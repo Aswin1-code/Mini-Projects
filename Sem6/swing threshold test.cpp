@@ -6,36 +6,55 @@ MPU6050 mpu;
 
 #define LED_PIN 2
 
-// ---------------- SETTINGS ----------------
+// =====================================================
+// FINAL STABLE SWING CLASSIFICATION CODE
+// Uses PEAK SPEED + PEAK IMPACT (NO velocity integration)
+// =====================================================
 
-// Weak test → 12
-// Medium test → 15
-// Strong test -> 20
-float START_THRESHOLD = 15;
+// ---------- Detection Thresholds ----------
+float START_THRESHOLD = 15.0;   // swing start detect
+float END_THRESHOLD   = 7.0;    // swing end detect
 
-float END_THRESHOLD = 7;
-float MIN_DURATION = 0.25;
-unsigned long COOLDOWN = 400;
+float MIN_DURATION = 0.20;      // minimum valid swing
+unsigned long COOLDOWN = 400;   // avoid double detection
 
-// ---------------- OFFSETS ----------------
+// ---------- Classification Thresholds ----------
 
-float axO = 0, ayO = 0, azO = 0;
+// WEAK:
+// speed  : 10 – 20
+// impact : 12 – 25
 
-// ---------------- SWING STATE ----------------
+// MEDIUM:
+// speed  : 20 – 40
+// impact : 25 – 40
 
+// STRONG:
+// speed  : > 40
+// impact : > 40
+
+// ---------- Offsets ----------
+float axO = 0;
+float ayO = 0;
+float azO = 0;
+
+float gxO = 0;
+float gyO = 0;
+float gzO = 0;
+
+// ---------- Swing State ----------
 bool swing = false;
+
 unsigned long swingStart = 0;
 unsigned long lastSwingEnd = 0;
 
-float velocity = 0;
+float peakSpeed = 0;
 float maxImpact = 0;
 
-// ---------------- FILTER ----------------
-
+// ---------- Gravity Filter ----------
 float gravity = 0;
 float alpha = 0.95;
 
-unsigned long lastTime = 0;
+// =====================================================
 
 void setup() {
   Serial.begin(115200);
@@ -53,9 +72,9 @@ void setup() {
 
   Serial.println("Calibrating... keep racket still for 3 sec");
 
-  // -------- Calibration --------
-
+  // ---------- Calibration ----------
   long ax = 0, ay = 0, az = 0;
+  long gx = 0, gy = 0, gz = 0;
   int n = 0;
 
   unsigned long t = millis();
@@ -67,8 +86,12 @@ void setup() {
     ax += a;
     ay += b;
     az += c;
-    n++;
 
+    gx += d;
+    gy += e;
+    gz += f;
+
+    n++;
     delay(2);
   }
 
@@ -76,22 +99,31 @@ void setup() {
   ayO = ay / (float)n;
   azO = az / (float)n;
 
-  lastTime = millis();
+  gxO = gx / (float)n;
+  gyO = gy / (float)n;
+  gzO = gz / (float)n;
 
-  Serial.println("timestamp,speed,impact,duration");
+  Serial.println("timestamp,speed,impact,duration,swing_type");
 }
+
+// =====================================================
 
 void loop() {
 
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
+  // ---------- Accelerometer ----------
   float Ax = (ax - axO) / 16384.0;
   float Ay = (ay - ayO) / 16384.0;
   float Az = (az - azO) / 16384.0;
 
-  // -------- Gravity Removal --------
+  // ---------- Gyroscope ----------
+  float Gx = (gx - gxO) / 131.0;
+  float Gy = (gy - gyO) / 131.0;
+  float Gz = (gz - gzO) / 131.0;
 
+  // ---------- Gravity Removal ----------
   gravity = alpha * gravity + (1 - alpha) * Az;
 
   float linAccX = Ax * 9.81;
@@ -104,11 +136,21 @@ void loop() {
     linAccZ * linAccZ
   );
 
-  unsigned long now = millis();
-  float dt = (now - lastTime) / 1000.0;
-  lastTime = now;
+  // ---------- Peak rotational speed ----------
+  float angularVelocity = sqrt(
+    Gx * Gx +
+    Gy * Gy +
+    Gz * Gz
+  );
 
-  // ---------------- START SWING ----------------
+  // convert to rough swing speed (km/h)
+  float instantSpeed = angularVelocity * 0.12;
+
+  unsigned long now = millis();
+
+  // =================================================
+  // START SWING
+  // =================================================
 
   if (!swing &&
       totalAcc > START_THRESHOLD &&
@@ -116,41 +158,60 @@ void loop() {
 
     swing = true;
     swingStart = now;
-    velocity = 0;
+
+    peakSpeed = instantSpeed;
     maxImpact = totalAcc;
 
     digitalWrite(LED_PIN, HIGH);
   }
 
-  // ---------------- DURING SWING ----------------
+  // =================================================
+  // DURING SWING
+  // =================================================
 
   if (swing) {
 
-    // TRUE 3-axis speed estimate
-    velocity += totalAcc * dt;
+    if (instantSpeed > peakSpeed)
+      peakSpeed = instantSpeed;
 
     if (totalAcc > maxImpact)
       maxImpact = totalAcc;
 
     float duration = (now - swingStart) / 1000.0;
 
-    // ---------------- END SWING ----------------
+    // =============================================
+    // END SWING
+    // =============================================
 
     if (totalAcc < END_THRESHOLD &&
         duration > MIN_DURATION) {
 
-      float speed = fabs(velocity) * 3.6;
+String swingType = "WEAK";
 
+if (peakSpeed >= 50.5 && maxImpact >= 42) {
+    swingType = "STRONG";
+}
+else if (peakSpeed >= 44) {
+    swingType = "MEDIUM";
+}
+else {
+    swingType = "WEAK";
+}
+
+      // ---------- Serial Output ----------
       Serial.print(now);
       Serial.print(",");
 
-      Serial.print(speed, 2);
+      Serial.print(peakSpeed, 2);
       Serial.print(",");
 
       Serial.print(maxImpact, 2);
       Serial.print(",");
 
-      Serial.println(duration, 2);
+      Serial.print(duration, 2);
+      Serial.print(",");
+
+      Serial.println(swingType);
 
       swing = false;
       lastSwingEnd = now;
@@ -162,9 +223,4 @@ void loop() {
   delay(10);
 }
 
-/*
-speed: 6 -17
-impact: 4-7
-duration: 0.25 - 0.4s
 
-*/
