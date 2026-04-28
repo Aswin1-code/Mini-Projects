@@ -17,7 +17,7 @@ float END_THRESHOLD   = 7.0;    // swing end detect
 
 float MIN_DURATION = 0.20;      // minimum valid swing
 unsigned long COOLDOWN = 400;   // avoid double detection
-
+  
 // ---------- Classification Thresholds ----------
 
 // WEAK:

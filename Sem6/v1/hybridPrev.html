@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Badminton Swing Analyzer</title>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family:'Segoe UI'; background:#101820; color:#FEE715; text-align:center; }
+    h1 { font-size:28px; margin-top:20px; }
+    .dashboard { display:flex; flex-wrap:wrap; justify-content:center; }
+    .card { margin:15px; padding:20px; background:#1c1c1c; border-radius:15px; width:220px; box-shadow:0 0 20px #FEE715; }
+    .card p { font-size:18px; margin:5px; }
+    .progress { width:100%; background:#333; border-radius:10px; height:10px; margin-top:5px; }
+    .bar { height:10px; border-radius:10px; background:#FEE715; width:0%; transition:0.3s; }
+    button { margin-top:15px; padding:10px 20px; font-size:16px; border:none; border-radius:10px; cursor:pointer; background:#FEE715; color:#101820; }
+  </style>
+</head>
+<body>
+  <h1>🏸 ESP32 Swing Dashboard</h1>
+  <div class="dashboard">
+    <div class="card">
+      <h2>Speed</h2>
+      <p id="speed">-- km/h</p>
+      <div class="progress"><div id="speed-bar" class="bar"></div></div>
+    </div>
+    <div class="card">
+      <h2>Impact</h2>
+      <p id="impact">-- m/s²</p>
+      <div class="progress"><div id="impact-bar" class="bar"></div></div>
+    </div>
+    <div class="card">
+      <h2>Angle</h2>
+      <p id="angle">-- °</p>
+    </div>
+    <div class="card">
+      <h2>Swing Type</h2>
+      <p id="type">--</p>
+    </div>
+    <div class="card">
+      <h2>Session Stats</h2>
+      <p id="maxSpeed">Max Speed: -- km/h</p>
+      <p id="maxImpact">Max Impact: -- m/s²</p>
+      <p id="swingCount">Swings: --</p>
+      <button onclick="downloadCSV()">Download CSV</button>
+    </div>
+  </div>
+  <script>
+    async function updateData(){
+      const res = await fetch('/data');
+      const data = await res.json();
+      document.getElementById("speed").innerText = data.speed.toFixed(2);
+      document.getElementById("impact").innerText = data.impact.toFixed(2);
+      document.getElementById("angle").innerText = data.angle.toFixed(1);
+      document.getElementById("type").innerText = data.type;
+      document.getElementById("maxSpeed").innerText = "Max Speed: "+data.maxSpeed.toFixed(2);
+      document.getElementById("maxImpact").innerText = "Max Impact: "+data.maxImpact.toFixed(2);
+      document.getElementById("swingCount").innerText = "Swings: "+data.swingCount;
+      document.getElementById("speed-bar").style.width = Math.min(data.speed,50)+"%";
+      document.getElementById("impact-bar").style.width = Math.min(data.impact,50)+"%";
+    }
+    setInterval(updateData, 200);
+
+    function downloadCSV(){
+      window.location.href = "/download";
+    }
+  </script>
+</body>
+</html>

@@ -121,7 +121,7 @@ const char htmlPage[] PROGMEM = R"rawliteral(
       document.getElementById("speed-bar").style.width = Math.min(data.speed,50)+"%";
       document.getElementById("impact-bar").style.width = Math.min(data.impact,50)+"%";
     }
-    setInterval(updateData, 200);
+    setInterval(updateData, 5);
 
     function downloadCSV(){
       window.location.href = "/download";
