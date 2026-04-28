@@ -1,0 +1,171 @@
+🏸 SMART BADMINTON PERFORMANCE ANALYTICS SYSTEM
+│
+├── 📡 1. Embedded Hardware Layer
+│   │
+│   ├── ESP32
+│   │   ├── Main controller
+│   │   ├── WiFi data transmission
+│   │   └── Sensor data handling
+│   │
+│   ├── MPU6050
+│   │   ├── Accelerometer
+│   │   ├── Gyroscope
+│   │   └── Swing motion capture
+│   │
+│   ├── LiPo Battery
+│   │   └── Portable power supply
+│   │
+│   ├── SD Card Module (Optional)
+│   │   └── Local session backup
+│   │
+│   └── Mounted on Badminton Racket
+│
+│
+├── 📥 2. Raw Data Collection
+│   │
+│   ├── Acceleration Data
+│   │   ├── acc_x
+│   │   ├── acc_y
+│   │   └── acc_z
+│   │
+│   ├── Gyroscope Data
+│   │   ├── gyro_x
+│   │   ├── gyro_y
+│   │   └── gyro_z
+│   │
+│   └── Timestamp
+│
+│
+├── ⚙️ 3. Feature Extraction Layer
+│   │
+│   ├── Primary Features
+│   │   ├── Speed
+│   │   ├── Impact
+│   │   └── Duration
+│   │
+│   ├── Derived Features (Laptop Side)
+│   │   ├── Power = speed × impact
+│   │   ├── Efficiency = impact / duration
+│   │   ├── Intensity
+│   │   ├── Consistency Score
+│   │   └── Fatigue Trend
+│   │
+│   └── Session Statistics
+│
+│
+├── 🎯 4. Player Calibration Model
+│   │
+│   ├── First-time User Setup
+│   │   ├── 10 Weak Swings
+│   │   ├── 10 Medium Swings
+│   │   └── 10 Strong Swings
+│   │
+│   ├── Personal Threshold Generation
+│   │   ├── Weak Threshold
+│   │   ├── Medium Threshold
+│   │   └── Strong Threshold
+│   │
+│   └── Personalized Classification Baseline
+│
+│
+├── 🤖 5. ML Model – Performance Classification
+│   │
+│   ├── Model Used
+│   │   └── Random Forest Classifier
+│   │
+│   ├── Input Features
+│   │   ├── Speed
+│   │   ├── Impact
+│   │   ├── Duration
+│   │   ├── Power
+│   │   └── Efficiency
+│   │
+│   └── Output
+│       ├── WEAK
+│       ├── MEDIUM
+│       └── STRONG
+│
+│
+├── 🏸 6. ML Model – Stroke Classification
+│   │
+│   ├── Model Used
+│   │   └── Random Forest Classifier
+│   │
+│   ├── Input Features
+│   │   ├── Speed
+│   │   ├── Impact
+│   │   ├── Duration
+│   │   ├── Gyroscope Pattern
+│   │   └── Acceleration Pattern
+│   │
+│   └── Output
+│       ├── SMASH
+│       ├── DROP
+│       ├── CLEAR
+│       └── DRIVE
+│
+│
+├── 🏆 7. Pro Player Comparison Engine
+│   │
+│   ├── Pro Player Dataset
+│   │   ├── Real Data / Synthetic MATLAB Data
+│   │   └── Benchmark Performance
+│   │
+│   ├── Comparison Metrics
+│   │   ├── Power
+│   │   ├── Efficiency
+│   │   ├── Consistency
+│   │   ├── Fatigue
+│   │   └── Stroke Quality
+│   │
+│   └── Gap Analysis
+│       ├── Near Pro Level
+│       ├── Needs Improvement
+│       └── Major Gap
+│
+│
+├── 🧠 8. AI Coaching Engine
+│   │
+│   ├── Technique Feedback
+│   │   ├── Timing Issues
+│   │   ├── Impact Weakness
+│   │   ├── Speed vs Control Mismatch
+│   │   └── Racket Contact Issues
+│   │
+│   ├── Fatigue Detection
+│   │   ├── Early vs Late Swing Comparison
+│   │   └── Performance Drop Detection
+│   │
+│   ├── Consistency Analysis
+│   │   └── Stability Score
+│   │
+│   └── Drill-Based Recommendations
+│       ├── Wrist Snap Drill
+│       ├── Shadow Smash Practice
+│       ├── Multi-shuttle Training
+│       └── Footwork + Recovery Drills
+│
+│
+└── 📊 9. Streamlit Dashboard UI
+    │
+    ├── KPI Cards
+    │   ├── Avg Power
+    │   ├── Efficiency
+    │   ├── Consistency
+    │   ├── Best Swing
+    │   └── Performance Grade
+    │
+    ├── Charts
+    │   ├── Speed Trend
+    │   ├── Power Trend
+    │   ├── Efficiency Distribution
+    │   ├── Radar Chart
+    │   ├── Fatigue Analysis
+    │   ├── Stroke Distribution
+    │   └── Pro Comparison Graph
+    │
+    ├── AI Coach Panel
+    │   └── Smart Feedback Cards
+    │
+    └── PDF Report Generation
+        └── Full Performance Report Export
