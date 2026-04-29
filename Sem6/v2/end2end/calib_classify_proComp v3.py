@@ -337,8 +337,10 @@ def classify():
     print("===================================")
     if comparison["gap_power"] >-200:
         print("Near Pro Level")
+        
     elif comparison["gap_power"] >-600:
         print("Needs improvement")
+    
     else:
         print("Major Gap")
         

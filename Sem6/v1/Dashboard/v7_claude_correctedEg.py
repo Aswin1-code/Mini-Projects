@@ -13,7 +13,7 @@ import joblib
 # -------------------------------
 try:
     _pkg = joblib.load(
-        r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\ML model PKL\swing_model.pkl"
+        r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v1\ML model PKL\swing_model.pkl"
     )
     MODEL = _pkg["model"]
     FEATURES = _pkg["features"]
