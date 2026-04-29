@@ -7,11 +7,12 @@ import os
 # =====================================================
 
 # First 30 swings → calibration dataset
-CALIBRATION_CSV = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\dataset\calibration mode v1.csv"
+#CALIBRATION_CSV = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\dataset\badminton_data.csv"
+CALIBRATION_CSV =r"C:\Users\aswin\Downloads\data 1\badminton_data.csv"
 
 # New swings to classify
-NEW_DATA_CSV = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\dataset\game mode v1.csv"
-
+#NEW_DATA_CSV = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\dataset\badminton_data (1).csv"
+NEW_DATA_CSV = r"C:\Users\aswin\Downloads\data 1\badminton_data (1).csv"
 # Threshold file
 THRESHOLD_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\thresholdFile.csv"
 
@@ -22,7 +23,7 @@ MODEL_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\performa
 PRO_DATASET_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\dataset\matlab generate pro data\pro_benchmark_dataset.csv"
 
 # Final output
-OUTPUT_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\end2end\finalClassifiedOp\final_classified_output_with_pro_comparison v1.csv"
+OUTPUT_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\end2end\finalClassifiedOp\final_classified_output_with_pro_comparison v2.csv"
 
 
 # =====================================================
