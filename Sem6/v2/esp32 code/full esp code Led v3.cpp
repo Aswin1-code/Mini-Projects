@@ -103,16 +103,6 @@ void blinkBlue(int t){
   }
 }
 
-// ================= Deep Sleep =================
-void goToSleep(){
-  Serial.println("Entering Deep Sleep...");
-  setGreen(0); setBlue(0);
-
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)BTN_GAME, 0);
-  delay(100);
-  esp_deep_sleep_start();
-}
-
 // ================= Web =================
 void handleRoot(){
   server.send(200,"text/html",htmlPage);
@@ -143,7 +133,7 @@ void handleDownload(){
   triggerDownload = false;
 
   delay(2000);
-  goToSleep();
+
 }
 
 // ================= Setup =================
