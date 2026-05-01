@@ -14,8 +14,8 @@ WebServer server(80);
 
 // ================= Pins =================
 #define LED_PIN 2
-#define BTN_CALIB 4
-#define BTN_GAME  5
+#define BTN_CALIB 22
+#define BTN_GAME  23
 
 // ================= Modes =================
 enum Mode {
@@ -93,7 +93,7 @@ async function update(){
 setInterval(update,200);
 
 function downloadCSV(){
-  window.location.href="/download";
+  window.location.href="/download/swing data";
 }
 </script>
 </body>
@@ -120,7 +120,7 @@ void handleData() {
 }
 
 void handleDownload() {
-  server.sendHeader("Content-Disposition","attachment; filename=data.csv");
+  server.sendHeader("Content-Disposition","attachment; filename=badminton_data.csv");
   server.send(200,"text/csv",csvData);
 
   // RESET AFTER DOWNLOAD
