@@ -82,6 +82,7 @@ void idleBreathing(){
   b += dir;
   if(b >= 80 || b <= 0) dir = -dir;
   setBlue(b);
+  delay(200);
 }
 
 // ================= MODE EFFECTS =================
