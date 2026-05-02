@@ -1,3 +1,5 @@
+//updated with FINAL LED UX
+
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -30,12 +32,23 @@ Mode currentMode = IDLE;
 float START_THRESHOLD = 15.0;
 float END_THRESHOLD   = 7.0;
 float MIN_DURATION = 0.20;
+unsigned long COOLDOWN = 400;
+
+// ================= Offsets =================
+float axO=0, ayO=0, azO=0;
+float gxO=0, gyO=0, gzO=0;
 
 // ================= Swing =================
 bool swing = false;
 unsigned long swingStart = 0;
+unsigned long lastSwingEnd = 0;
+
 float peakSpeed = 0;
 float maxImpact = 0;
+
+// ================= Gravity =================
+float gravity = 0;
+float alpha = 0.95;
 
 // ================= Live =================
 float live_speed=0, live_impact=0;
@@ -55,9 +68,6 @@ bool lastGameState = HIGH;
 const char htmlPage[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="UTF-8">
-</head>
 <body>
 <h2>🏸 Smart Racket</h2>
 <p id="mode"></p>
@@ -85,28 +95,72 @@ setInterval(update,200);
 </html>
 )rawliteral";
 
-// ================= LED FUNCTIONS =================
+// ================= LED CORE =================
 void setGreen(int b){ ledcWrite(CH_GREEN, b); }
 void setBlue(int b){ ledcWrite(CH_BLUE, b); }
 
-void blinkGreen(int t){
-  for(int i=0;i<t;i++){
-    setGreen(255); delay(100);
-    setGreen(0); delay(100);
+// 🔵 Idle breathing (max 80)
+void idleBreathing(){
+  static int b = 0, dir = 2;
+  b += dir;
+  if(b >= 80 || b <= 0) dir = -dir;
+  setBlue(b);
+}
+
+// 🎬 Calibration ENTRY
+void calibEntry(){
+  setBlue(20);
+  for(int i=0;i<2;i++){
+    setGreen(120); delay(120);
+    setGreen(0);   delay(120);
   }
 }
 
-void blinkBlue(int t){
-  for(int i=0;i<t;i++){
-    setBlue(255); delay(100);
-    setBlue(0); delay(100);
+// 🎬 Calibration EXIT
+void calibExit(){
+  setGreen(150);
+  delay(300);
+  setGreen(0);
+}
+
+// 🎬 Game ENTRY
+void gameEntry(){
+  setBlue(0);
+  for(int i=0;i<3;i++){
+    setGreen(120); delay(100);
+    setGreen(0);   delay(100);
   }
+  setBlue(10);
+}
+
+// 🎬 Game EXIT
+void gameExit(){
+  for(int i=0;i<2;i++){
+    setBlue(80); setGreen(80);
+    delay(120);
+    setBlue(0); setGreen(0);
+    delay(120);
+  }
+}
+
+// 🎯 Swing feedback (smooth)
+void swingLED(float speed){
+  int b = map(speed, 0, 80, 40, 150);
+  setGreen(b);
+  delay(80);
+  setGreen(0);
+}
+
+// ================= Deep Sleep =================
+void goToSleep(){
+  setGreen(0); setBlue(0);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)BTN_GAME, 0);
+  delay(100);
+  esp_deep_sleep_start();
 }
 
 // ================= Web =================
-void handleRoot(){
-  server.send(200,"text/html",htmlPage);
-}
+void handleRoot(){ server.send(200,"text/html",htmlPage); }
 
 void handleData(){
   String modeStr = (currentMode==CALIBRATION)?"CALIBRATION":
@@ -127,13 +181,38 @@ void handleDownload(){
   server.sendHeader("Content-Disposition","attachment; filename=data.csv");
   server.send(200,"text/csv",csvData);
 
-  // reset
   csvData = "timestamp,speed,impact\n";
   swingCount = 0;
   triggerDownload = false;
 
   delay(2000);
+  goToSleep();
+}
 
+// ================= Calibration =================
+void calibrateMPU(){
+  long ax=0, ay=0, az=0, gx=0, gy=0, gz=0;
+  int n=0;
+
+  for(int i=0;i<300;i++){
+    int16_t a,b,c,d,e,f;
+    mpu.getMotion6(&a,&b,&c,&d,&e,&f);
+
+    ax+=a; ay+=b; az+=c;
+    gx+=d; gy+=e; gz+=f;
+
+    setBlue(10);
+    delay(5);
+    n++;
+  }
+
+  axO=ax/(float)n;
+  ayO=ay/(float)n;
+  azO=az/(float)n;
+
+  gxO=gx/(float)n;
+  gyO=gy/(float)n;
+  gzO=gz/(float)n;
 }
 
 // ================= Setup =================
@@ -144,22 +223,13 @@ void setup(){
   pinMode(BTN_CALIB, INPUT_PULLUP);
   pinMode(BTN_GAME, INPUT_PULLUP);
 
-  // PWM setup
-  ledcSetup(CH_GREEN, 5000, 8);
-  ledcAttachPin(GREEN_LED, CH_GREEN);
+  ledcSetup(CH_GREEN,5000,8);
+  ledcAttachPin(GREEN_LED,CH_GREEN);
 
-  ledcSetup(CH_BLUE, 5000, 8);
-  ledcAttachPin(BLUE_LED, CH_BLUE);
+  ledcSetup(CH_BLUE,5000,8);
+  ledcAttachPin(BLUE_LED,CH_BLUE);
 
   mpu.initialize();
-
-  if(!mpu.testConnection()){
-    while(1){
-      blinkBlue(1);
-      setGreen(255);
-      delay(100);
-    }
-  }
 
   WiFi.softAP(ssid,password);
 
@@ -173,16 +243,12 @@ void setup(){
 void loop(){
   server.handleClient();
 
-  // ========= IDLE MODE =========
+  // 🔵 Idle breathing
   if(currentMode==IDLE){
-    static int b=0, dir=5;
-    b+=dir;
-    if(b>=255||b<=0) dir=-dir;
-    setBlue(b);
-    delay(10);
+    idleBreathing();
   }
 
-  // ========= BUTTONS =========
+  // ===== Buttons =====
   bool c = digitalRead(BTN_CALIB);
   bool g = digitalRead(BTN_GAME);
 
@@ -190,12 +256,12 @@ void loop(){
   if(lastCalibState==HIGH && c==LOW){
     if(currentMode!=CALIBRATION){
       currentMode=CALIBRATION;
-      blinkBlue(2);
+      calibEntry();
+      calibrateMPU();
     } else {
+      calibExit();
       currentMode=IDLE;
       triggerDownload=true;
-      setGreen(255); delay(500);
-      setGreen(0);
     }
     delay(300);
   }
@@ -204,14 +270,11 @@ void loop(){
   if(lastGameState==HIGH && g==LOW){
     if(currentMode!=GAME){
       currentMode=GAME;
-      blinkGreen(3);
+      gameEntry();
     } else {
+      gameExit();
       currentMode=IDLE;
       triggerDownload=true;
-      for(int i=0;i<3;i++){
-        setGreen(255); setBlue(255); delay(100);
-        setGreen(0); setBlue(0); delay(100);
-      }
     }
     delay(300);
   }
@@ -219,19 +282,41 @@ void loop(){
   lastCalibState=c;
   lastGameState=g;
 
-  // ========= SENSOR =========
+  // ===== Mode steady LEDs =====
+  if(currentMode==CALIBRATION){
+    setBlue(10);
+  }
+  else if(currentMode==GAME){
+    setBlue(10);
+  }
+
+  // ===== Sensor =====
   int16_t ax,ay,az,gx,gy,gz;
   mpu.getMotion6(&ax,&ay,&az,&gx,&gy,&gz);
 
-  float totalAcc = sqrt(ax*ax+ay*ay+az*az)/16384.0*9.81;
-  float angVel = sqrt(gx*gx+gy*gy+gz*gz)/131.0;
-  float speed = angVel*0.12;
+  float Ax=(ax-axO)/16384.0;
+  float Ay=(ay-ayO)/16384.0;
+  float Az=(az-azO)/16384.0;
+
+  float Gx=(gx-gxO)/131.0;
+  float Gy=(gy-gyO)/131.0;
+  float Gz=(gz-gzO)/131.0;
+
+  gravity = alpha*gravity+(1-alpha)*Az;
+
+  float linAccZ=(Az-gravity)*9.81;
+
+  float totalAcc = sqrt(Ax*Ax+Ay*Ay+linAccZ*linAccZ);
+  float angVel = sqrt(Gx*Gx+Gy*Gy+Gz*Gz);
+  float speed = angVel * 0.18;
 
   unsigned long now=millis();
 
   if(currentMode==CALIBRATION || currentMode==GAME){
 
-    if(!swing && totalAcc>START_THRESHOLD){
+    if(!swing && totalAcc>START_THRESHOLD &&
+       (now-lastSwingEnd>COOLDOWN)){
+
       swing=true;
       swingStart=now;
       peakSpeed=speed;
@@ -251,15 +336,12 @@ void loop(){
         live_speed=peakSpeed;
         live_impact=maxImpact;
 
-        // intensity LED
-        int bright = map(peakSpeed,0,50,50,255);
-        setGreen(bright);
-        delay(80);
-        setGreen(0);
+        swingLED(peakSpeed);
 
         csvData += String(now)+","+String(peakSpeed)+","+String(maxImpact)+"\n";
 
         swing=false;
+        lastSwingEnd=now;
       }
     }
   }
