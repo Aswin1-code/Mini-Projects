@@ -137,8 +137,8 @@ st.markdown("""
 # =====================================================
 # FILE PATHS
 # =====================================================
-CALIBRATION_CSV = r"C:\Users\aswin\Downloads\data 1\badminton_data.csv"
-NEW_DATA_CSV = r"C:\Users\aswin\Downloads\data 1\badminton_data (1).csv"
+CALIBRATION_CSV = r"C:\Users\aswin\Downloads\data 1\data.csv"
+NEW_DATA_CSV = r"C:\Users\aswin\Downloads\data 1\data (1).csv"
 THRESHOLD_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\thresholdFile.csv"
 SWING_MODEL_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\performanceClassify ml train\swing_model.pkl"
 STROKE_MODEL_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\strokeClassifierModel\stroke classifier pkl\stroke_model.pkl"
