@@ -1,0 +1,148 @@
+🏸🔥 STROKE CLASSIFICATION MODEL (V3) — FINAL SUMMARY
+🎯 1. OBJECTIVE
+
+Classify badminton strokes into:
+
+SMASH / DROP / CLEAR / DRIVE
+
+Using IMU-based swing features captured from ESP32.
+
+📡 2. DATA SOURCE (ESP32 SYSTEM)
+📦 ONE ROW = ONE COMPLETE SWING
+
+ESP32 detects a swing and outputs:
+
+🔵 RAW SENSOR DATA
+ax, ay, az
+gx, gy, gz
+⚙️ SWING SUMMARY FEATURES (computed on ESP32)
+peak_acc
+peak_gyro
+duration
+acc_mag_mean
+gyro_mag_mean
+swing_id
+timestamp
+🚫 NOT USED FOR TRAINING
+raw streaming IMU sequences ❌
+frame-by-frame data ❌
+redundant dashboard-only values ❌
+🧠 3. FEATURE ENGINEERING (PYTHON ONLY)
+
+From ESP32 swing-summary data, we compute:
+
+🔵 CORE FEATURES
+peak_acc
+peak_gyro
+duration
+acc_mag_mean
+gyro_mag_mean
+🧠 ENGINEERED FEATURES (XGBOOST POWER FEATURES)
+⚡ Explosiveness
+SPI = peak_gyro · log(1 + peak_acc)
+explosive_energy = peak_acc · peak_gyro · duration
+impact_ratio = peak_acc / (peak_gyro + ε)
+🏎 Speed & Efficiency
+acc_efficiency = peak_acc / duration
+gyro_efficiency = peak_gyro / duration
+control_index = acc_mag_mean / (gyro_mag_mean + ε)
+🎯 Swing Signature
+burst_acc = peak_acc / (acc_mag_mean + ε)
+burst_gyro = peak_gyro / (gyro_mag_mean + ε)
+shape_ratio = (peak_gyro · duration) / (peak_acc + ε)
+🧠 Stability Metrics
+aggression = (peak_acc + peak_gyro) · duration
+smoothness = (acc_mag_mean + gyro_mag_mean) / (peak_acc + peak_gyro + ε)
+📦 FINAL FEATURE VECTOR (~14 FEATURES)
+peak_acc
+peak_gyro
+duration
+acc_mag_mean
+gyro_mag_mean
+SPI
+explosive_energy
+impact_ratio
+acc_efficiency
+gyro_efficiency
+control_index
+burst_acc
+burst_gyro
+shape_ratio
+aggression
+smoothness
+🏷️ 4. LABEL (TARGET)
+stroke
+
+Values:
+
+SMASH
+DROP
+CLEAR
+DRIVE
+⚙️ 5. MODEL
+🧠 Algorithm:
+XGBoost Classifier
+Why XGBoost:
+handles non-linear IMU patterns well
+works well with mixed engineered + raw features
+robust for small/medium datasets
+high accuracy for tabular sensor data
+📊 6. DATASET STRUCTURE
+ONE ROW FORMAT:
+peak_acc, peak_gyro, duration,
+acc_mag_mean, gyro_mag_mean,
+SPI, explosive_energy, impact_ratio,
+acc_efficiency, gyro_efficiency,
+control_index, burst_acc, burst_gyro,
+shape_ratio, aggression, smoothness,
+stroke
+🧪 7. TRAINING PIPELINE
+STEP 1 — Data Collection
+ESP32 collects swings
+50 SMASH / 50 DROP / 50 CLEAR / 50 DRIVE
+STEP 2 — Dataset Creation
+each swing = 1 row
+exported as CSV
+STEP 3 — Feature Engineering (Python)
+compute 14 engineered features
+clean dataset
+STEP 4 — Train Model
+XGBoostClassifier.fit(X, y)
+STEP 5 — Evaluation
+accuracy
+confusion matrix
+class-wise performance
+STEP 6 — Save Model
+stroke_xgboost.pkl
+📡 8. DEPLOYMENT FLOW
+REAL-TIME SYSTEM:
+ESP32:
+detects swing
+sends swing summary
+
+↓
+
+Python backend:
+computes features
+loads .pkl
+predicts stroke
+
+↓
+
+Dashboard:
+displays result (SMASH / DROP / CLEAR / DRIVE)
+🧠 9. KEY DESIGN PRINCIPLE
+
+✔ ESP32 = data capture only
+✔ Python = intelligence layer
+✔ XGBoost = decision engine
+✔ Features = physics-based + engineered hybrid
+
+🚀 FINAL VERDICT
+🟢 YOUR SYSTEM IS NOW:
+
+✔ Fully defined
+✔ Feature-consistent
+✔ Model-ready
+✔ Deployment-ready
+✔ Research-grade ML pipeline
