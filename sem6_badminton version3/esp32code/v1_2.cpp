@@ -4,8 +4,8 @@
 #include <ArduinoJson.h>
 
 // ================= WIFI =================
-const char* ssid = "YOUR_WIFI";
-const char* password = "YOUR_PASSWORD";
+const char* ssid = "Badminton";
+const char* password = "2027";
 
 WebServer server(80);
 
