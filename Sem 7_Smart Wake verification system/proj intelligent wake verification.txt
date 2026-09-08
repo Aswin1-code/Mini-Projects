@@ -1,0 +1,478 @@
+Gate A ✅
+Mission & Vision
+
+        ↓
+
+Gate B 🚧
+Technology Exploration
+(Sensors, embedded platforms, communication)
+
+        ↓
+
+Gate C
+Sensor Evaluation Matrix
+⬅️ We are almost here
+
+        ↓
+
+Gate D
+Sensor Selection
+(Lock the sensing architecture)
+
+        ↓
+
+Gate E
+Research Landscape
+(Papers, patents, products)
+
+        ↓
+
+Gate F
+System Requirements
+
+        ↓
+
+Gate G
+Architecture Design
+
+        ↓
+
+Gate H
+Algorithms & Intelligence
+
+-----------------------------------------------------------------------
+
+
+
+	Intelligent mmwave module. 
+presence, motion, distance, motion energy, stationary energy
+
+
+
+----------------------------------------------------------------------
+
+✅ Phase 1 — Problem Discovery
+[✔] Identify real-world problem
+[✔] Why existing alarm systems fail
+[✔] Define project objective
+
+Status: LOCKED 🔒
+
+✅ Phase 2 — Behaviour Research
+
+Question:
+
+What evidence proves a person is genuinely awake?
+
+[✔] Body movement
+[✔] Continuous activity
+[✔] Room occupancy
+[✔] Cognitive response
+[✔] Light interaction
+[✔] Door interaction
+[✔] Sound generation
+
+Prioritized the behaviours.
+
+Status: LOCKED 🔒
+
+✅ Phase 3 — Sensor Technology Research
+
+Question:
+
+Which physical phenomena can measure those behaviours?
+
+Compared
+
+[✔] PIR
+[✔] Ultrasonic
+[✔] Camera
+[✔] Thermal
+[✔] LiDAR
+[✔] Pressure
+[✔] mmWave
+
+Winner
+
+🏆 Intelligent mmWave Radar
+
+Status: LOCKED 🔒
+
+✅ Phase 4 — Sensor Selection
+
+Compared available modules.
+
+[✔] LD2410
+[✔] LD2410B
+[✔] LD2410C
+[✔] Others
+
+Current choice
+
+🏆 HLK-LD2410C
+
+Status: LOCKED 🔒
+
+✅ Phase 5 — Sensor Capability Analysis
+
+Question
+
+What information does the sensor actually provide?
+
+Studied
+
+[✔] Datasheet
+[✔] Communication protocol
+[✔] UART outputs
+[✔] Engineering Mode
+[✔] Motion energy
+[✔] Stationary energy
+[✔] Distance gates
+
+Status: LOCKED 🔒
+
+🟡 Phase 6 — Behaviour-to-Feature Mapping (CURRENT PHASE)
+
+This is where we are.
+
+Question:
+
+How do the radar outputs represent human behaviour?
+
+Example:
+
+Human Behaviour -----  Radar Evidence
+Sleeping	Low stationary energy, no movement
+Turning in bed	Small motion burst, same distance gate
+Sitting up	Increase in motion energy
+Standing	Motion + changing distance
+Walking	Distance gates change continuously
+Studying	High stationary energy near desk
+Leaving room	Movement toward door → no target
+Returning to bed	Reverse gate transition
+
+This is probably the most important research phase of the whole project.
+
+⏳ Phase 7 — Wakefulness Intelligence Design
+
+Question:
+
+How should the system think?
+
+Not coding.
+
+Pure logic.
+
+Examples:
+
+Confidence Score
+Behaviour Points
+Evidence Fusion
+Time Decay
+Decision States
+Wake Verification Logic
+
+This is where your novelty will likely emerge.
+
+⏳ Phase 8 — Edge Case Analysis
+
+Questions like:
+
+User rolls over
+User sits for 30 seconds
+User studies in darkness
+Two people in room
+Pet movement
+Fan movement
+Blanket movement
+User wakes then sleeps again
+
+Goal:
+
+Make the intelligence robust.
+
+⏳ Phase 9 — Complete System Architecture
+
+Draw
+
+Alarm
+
+↓
+
+Radar
+
+↓
+
+Feature Extraction
+
+↓
+
+Evidence Engine
+
+↓
+
+Wakefulness Intelligence
+
+↓
+
+Decision
+
+↓
+
+Verified Wake-up
+
+Only architecture.
+
+No coding.
+
+⏳ Phase 10 — Component Finalization
+
+Now decide
+
+ESP32
+Display
+Buttons
+Speaker
+RTC
+Power
+Communication
+PCB
+⏳ Phase 11 — Prototype Implementation
+
+Finally...
+
+Hardware.
+
+⏳ Phase 12 — Algorithm Implementation
+
+Now...
+
+Coding begins.
+
+⏳ Phase 13 — Testing & Validation
+
+Collect data.
+
+Tune thresholds.
+
+Evaluate accuracy.
+
+Compare with existing systems.
+
+
+-----------------------------------
+
+I think we should classify behaviours instead of randomly listing them.
+
+Imagine a tree.
+
+Alarm Rings
+│
+├── No Response
+│
+├── Passive Response
+│
+├── Cognitive Response
+│
+├── Physical Response
+│
+├── Sustained Activity
+│
+└── Failure / Relapse
+
+This makes it much easier to analyse later.
+
+---------------------------------------------------
+
+# Phase 6.1 – Human Wakefulness State Space Modeling
+
+## Objective
+
+The objective of this phase is to enumerate every possible human state that may exist at the instant an alarm begins and during the transition to wakefulness, determine what the HLK-LD2410C mmWave radar can actually observe, and identify whether those observations constitute reliable evidence of wakefulness.
+
+This state-space model forms the foundation of the intelligent wake verification algorithm.
+
+---
+
+## Detection Legend
+
+* **✅ Detectable** – Can be reliably observed by the HLK-LD2410C.
+* **⚠️ Partially Detectable** – Can be inferred indirectly or only under certain conditions.
+* **❌ Not Detectable** – Cannot be observed by the sensor.
+
+### Wakefulness Evidence
+
+* **🟢 Strong** – High confidence that the user is awake.
+* **🟡 Moderate/Weak** – Suggests wakefulness but is not sufficient alone.
+* **🔴 None** – Provides no reliable evidence of wakefulness.
+
+---
+
+# Category A – Sleep States
+
+These represent conditions before the alarm has produced any meaningful effect.
+
+| State               | Detectable | Observable by HLK-LD2410C                                                 | Wakefulness Evidence |
+| ------------------- | ---------- | ------------------------------------------------------------------------- | -------------------- |
+| **A1. Deep Sleep**  | ✅          | Tiny chest movement due to breathing, nearly constant posture             | 🔴 None              |
+| **A2. Light Sleep** | ✅          | Small body shifts, turning, blanket adjustments, occasional limb movement | 🔴 None              |
+| **A3. REM Sleep**   | ⚠️         | Small muscle twitches, finger/leg movement, breathing                     | 🔴 None              |
+
+### Key Observation
+
+The radar detects **movement**, not **wakefulness**.
+
+Movement alone must never be interpreted as evidence that the user is awake.
+
+---
+
+# Category B – Transitional States
+
+These represent the transition between sleep and wakefulness and are responsible for many alarm failures.
+
+| State                                      | Detectable | Observable by HLK-LD2410C                             | Wakefulness Evidence |
+| ------------------------------------------ | ---------- | ----------------------------------------------------- | -------------------- |
+| **B1. Alarm heard but brain still asleep** | ⚠️         | Brief arm movement toward phone or alarm              | 🔴 None              |
+| **B2. Half Awake**                         | ✅          | Sitting up slowly, unstable posture, limited movement | 🟡 Weak              |
+| **B3. Sleep Inertia**                      | ✅          | Standing, slow walking, sluggish body movement        | 🟡 Partial           |
+
+### Key Observation
+
+Purposeful movement can occur while the brain is still partially asleep.
+
+Therefore,
+
+**Movement ≠ Wakefulness**
+
+---
+
+# Category C – Awake but Stationary
+
+These are the most challenging situations for wakefulness verification.
+
+| State                          | Detectable | Observable by HLK-LD2410C                          | Wakefulness Evidence |
+| ------------------------------ | ---------- | -------------------------------------------------- | -------------------- |
+| **C1. Awake lying in bed**     | ✅          | Chest movement only                                | 🟡 Weak              |
+| **C2. Using phone**            | ⚠️         | Small hand movements, sometimes almost no movement | 🟡 Moderate          |
+| **C3. Reading**                | ⚠️         | Minor posture adjustments                          | 🟡 Moderate          |
+| **C4. Meditating**             | ✅          | Nearly motionless body                             | 🟡 Moderate          |
+| **C5. Looking at the ceiling** | ✅          | Almost identical to sleeping posture               | 🔴 Very Weak         |
+
+### Key Observation
+
+A fully awake person can remain almost motionless.
+
+Therefore,
+
+**Awake ≠ Moving**
+
+---
+
+# Category D – Transition to Activity
+
+These represent the physical transition from bed to normal activity.
+
+| State                    | Detectable | Observable by HLK-LD2410C            | Wakefulness Evidence                                    |
+| ------------------------ | ---------- | ------------------------------------ | ------------------------------------------------------- |
+| **D1. Sitting on bed**   | ✅          | Significant posture change           | 🟡 Moderate                                             |
+| **D2. Legs off the bed** | ✅          | Body orientation changes             | 🟡 Moderate                                             |
+| **D3. Standing**         | ✅          | Large posture change                 | 🟢 Strong                                               |
+| **D4. Walking**          | ✅          | Continuous body movement across room | 🟢 Strong                                               |
+| **D5. Leaving the room** | ⚠️         | User exits radar coverage            | 🟢 Strong (especially when combined with a door sensor) |
+
+---
+
+# Category E – Active Awake States
+
+These indicate sustained wakefulness through purposeful activities.
+
+| State                    | Detectable | Observable by HLK-LD2410C              | Wakefulness Evidence                              |
+| ------------------------ | ---------- | -------------------------------------- | ------------------------------------------------- |
+| **E1. Brushing teeth**   | ⚠️         | Rhythmic body movement within coverage | 🟢 Strong                                         |
+| **E2. Bathing**          | ⚠️         | User leaves sensing region             | 🟢 Strong                                         |
+| **E3. Studying**         | ⚠️         | Small posture and hand movements       | 🟢 Strong (especially after challenge completion) |
+| **E4. Laptop work**      | ⚠️         | Hand and upper-body micro-movements    | 🟢 Strong                                         |
+| **E5. Phone usage**      | ⚠️         | Small repetitive hand movements        | 🟢 Strong (with cognitive verification)           |
+| **E6. Exercise**         | ✅          | Continuous, high-energy movement       | 🟢 Very Strong                                    |
+| **E7. Eating**           | ⚠️         | Repetitive arm movement                | 🟢 Strong                                         |
+| **E8. Cleaning room**    | ✅          | Continuous movement throughout room    | 🟢 Very Strong                                    |
+| **E9. Packing bag**      | ✅          | Frequent bending and posture changes   | 🟢 Strong                                         |
+| **E10. Wearing clothes** | ✅          | Repeated posture transitions           | 🟢 Strong                                         |
+
+---
+
+# Category F – False Positives (Highest Priority)
+
+These are situations that may appear similar to wakefulness but must never be classified as genuine wakefulness.
+
+| State                                         | Detectable | Observable by HLK-LD2410C                     | Wakefulness Evidence                        |
+| --------------------------------------------- | ---------- | --------------------------------------------- | ------------------------------------------- |
+| **F1. Rolling during sleep**                  | ✅          | Large body movement                           | 🔴 None                                     |
+| **F2. Stretching while asleep**               | ✅          | Arm extension and posture adjustment          | 🔴 None                                     |
+| **F3. Blanket movement**                      | ⚠️         | Minor radar disturbance                       | 🔴 None                                     |
+| **F4. Curtain moving due to fan**             | ⚠️         | Continuous moving object                      | 🔴 None                                     |
+| **F5. Pet movement**                          | ⚠️         | Small moving target                           | 🔴 None                                     |
+| **F6. Another person enters room**            | ✅          | Human detected                                | 🔴 Invalid unless user identity is verified |
+| **F7. User wakes briefly then sleeps again**  | ✅          | Short burst of activity followed by stillness | 🔴 None                                     |
+| **F8. Sitting briefly then lying down again** | ✅          | Temporary posture change                      | 🔴 None                                     |
+| **F9. Reaching phone while asleep**           | ✅          | Brief arm movement                            | 🔴 None                                     |
+| **F10. Sleep talking**                        | ❌          | No detectable radar signature                 | 🔴 None                                     |
+
+### Key Observation
+
+Almost every false positive includes movement.
+
+However,
+
+**Movement without sustained behavioral change is not evidence of wakefulness.**
+
+---
+
+# Category G – Exceptional States
+
+These represent uncommon but important situations for building a robust and reliable wake verification system.
+
+| State                                     | Detectable | Observable by HLK-LD2410C             | Wakefulness Evidence          |
+| ----------------------------------------- | ---------- | ------------------------------------- | ----------------------------- |
+| **Person is sick**                        | ✅          | Very limited movement                 | 🟡 Weak                       |
+| **Person is unconscious**                 | ✅          | Breathing only                        | 🔴 None                       |
+| **Person faints after waking**            | ✅          | Sudden collapse followed by stillness | 🔴 Emergency Pattern          |
+| **Person already awake before alarm**     | ✅          | Continuous activity before alarm      | 🟢 Strong (context-dependent) |
+| **Person wakes because of another sound** | ✅          | Activity before scheduled alarm       | 🟢 Strong                     |
+| **Person never slept**                    | ✅          | Continuous presence and activity      | 🟢 Strong                     |
+
+---
+
+# Major Research Insight
+
+The HLK-LD2410C is **not a wakefulness sensor**.
+
+It is fundamentally a **human presence and motion sensor**.
+
+Its outputs alone cannot determine whether a user is genuinely awake.
+
+The novelty of this research lies in interpreting **the sequence of observations over time**, rather than making decisions from a single sensor reading.
+
+Wakefulness should therefore be treated as a **behavioral transition** instead of an instantaneous event.
+
+The system should answer the following question:
+
+> **"Does the sequence of observed behaviors match the characteristics of sustained wakefulness?"**
+
+rather than simply asking,
+
+> **"Is the user moving?"**
+
+This behavioral interpretation forms the basis for the proposed adaptive wake verification algorithm.
+
+---
+
+# Phase 6.1 Outcome
+
+The following objectives have been successfully completed:
+
+* Human wakefulness state space identified.
+* HLK-LD2410C observability mapped for every state.
+* False-positive scenarios identified.
+* Wakefulness evidence classified.
+* Foundation established for the adaptive wake verification algorithm.

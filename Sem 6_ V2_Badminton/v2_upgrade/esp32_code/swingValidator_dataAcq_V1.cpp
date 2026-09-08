@@ -1,0 +1,515 @@
+#include <Wire.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <MPU6050.h>
+#include <math.h>
+
+MPU6050 mpu;
+
+// =====================================================
+// BADMINTON SWING ANALYZER
+// SAME STABLE LOGIC + SIMPLE WEB UI + CSV DOWNLOAD
+// DATASET COLLECTION VERSION
+// =====================================================
+
+// ---------------- WiFi AP ----------------
+const char* ssid = "Badminton AI";
+const char* password = "hello123";
+
+WebServer server(80);
+
+// ---------------- LED ----------------
+#define LED_PIN 2
+
+// =====================================================
+// DATASET LABELS
+// CHANGE ONLY THESE BEFORE EACH DATA COLLECTION SESSION
+// =====================================================
+
+// INVALID FREE SWING EXAMPLES:
+// const char* DATA_VALIDITY  = "INVALID";
+// const char* DATA_STROKE    = "NONE";
+// const char* DATA_INTENSITY = "WEAK";
+
+// VALID REAL SWING EXAMPLES:
+// const char* DATA_VALIDITY  = "VALID";
+// const char* DATA_STROKE    = "SMASH";
+// const char* DATA_INTENSITY = "STRONG";
+
+const char* DATA_VALIDITY  = "INVALID";
+const char* DATA_STROKE    = "NONE";
+const char* DATA_INTENSITY = "WEAK";
+
+// ---------------- Detection Thresholds ----------------
+float START_THRESHOLD = 17.0;
+float END_THRESHOLD   = 8.5;
+
+float MIN_DURATION = 0.25;
+unsigned long COOLDOWN = 350;
+
+// ---------------- Offsets ----------------
+float axO = 0;
+float ayO = 0;
+float azO = 0;
+
+float gxO = 0;
+float gyO = 0;
+float gzO = 0;
+
+// ---------------- Swing State ----------------
+bool swing = false;
+
+unsigned long swingStart = 0;
+unsigned long lastSwingEnd = 0;
+
+float peakSpeed = 0;
+float maxImpact = 0;
+
+// ---------------- Gravity Filter ----------------
+float gravity = 0;
+float alpha = 0.95;
+
+// ---------------- Live Data ----------------
+float live_ax = 0;
+float live_ay = 0;
+float live_az = 0;
+
+float live_gx = 0;
+float live_gy = 0;
+float live_gz = 0;
+
+float live_speed = 0;
+float live_impact = 0;
+float live_duration = 0;
+
+unsigned long live_time = 0;
+int swingCount = 0;
+
+// ---------------- CSV Storage ----------------
+String csvData =
+"sno,timestamp,swing_count,ax,ay,az,gx,gy,gz,speed,impact,duration,validity,stroke_type,intensity\n";
+
+// =====================================================
+// SIMPLE FAST HTML DASHBOARD
+// =====================================================
+const char htmlPage[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Badminton Swing Dashboard</title>
+
+<style>
+body {
+  font-family: Arial;
+  background: #111;
+  color: white;
+  text-align: center;
+  padding: 20px;
+}
+
+.box {
+  background: #1f1f1f;
+  padding: 20px;
+  border-radius: 10px;
+  display: inline-block;
+  text-align: left;
+  min-width: 420px;
+}
+
+p {
+  font-size: 18px;
+  margin: 8px 0;
+}
+
+button {
+  margin-top: 20px;
+  padding: 10px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🏸 Badminton Swing Dashboard</h1>
+
+<div class="box">
+
+  <p id="time">Timestamp : --</p>
+  <p id="speed">Speed : -- km/h</p>
+  <p id="impact">Impact : -- m/s²</p>
+  <p id="duration">Duration : -- sec</p>
+  <p id="count">Swing Count : 0</p>
+
+  <button onclick="downloadCSV()">Download CSV</button>
+
+</div>
+
+<script>
+async function updateData() {
+  const res = await fetch('/data');
+  const data = await res.json();
+
+  document.getElementById("time").innerText =
+    "Timestamp : " + data.time;
+
+  document.getElementById("speed").innerText =
+    "Speed : " + data.speed.toFixed(2);
+
+  document.getElementById("impact").innerText =
+    "Impact : " + data.impact.toFixed(2);
+
+  document.getElementById("duration").innerText =
+    "Duration : " + data.duration.toFixed(2) + " sec";
+
+  document.getElementById("count").innerText =
+    "Swing Count : " + data.count;
+}
+
+setInterval(updateData, 100);
+
+function downloadCSV() {
+  window.location.href = "/download";
+}
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+// =====================================================
+// WEB HANDLERS
+// =====================================================
+void handleRoot() {
+  server.send(200, "text/html", htmlPage);
+}
+
+void handleData() {
+  String json = "{";
+
+  json += "\"time\":" + String(live_time) + ",";
+  json += "\"speed\":" + String(live_speed) + ",";
+  json += "\"impact\":" + String(live_impact) + ",";
+  json += "\"duration\":" + String(live_duration) + ",";
+  json += "\"count\":" + String(swingCount);
+
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+void handleDownload() {
+  server.sendHeader(
+    "Content-Disposition",
+    "attachment; filename=badminton_data.csv"
+  );
+
+  server.send(200, "text/csv", csvData);
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+void setup() {
+
+  Serial.begin(115200);
+
+  Wire.begin(26, 25);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  mpu.initialize();
+
+  mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
+
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 FAILED");
+    while (1);
+  }
+
+  Serial.println("Calibrating... keep racket still for 3 sec");
+
+  // ---------------- Calibration ----------------
+  long ax = 0, ay = 0, az = 0;
+  long gx = 0, gy = 0, gz = 0;
+
+  int n = 0;
+
+  unsigned long t = millis();
+
+  while (millis() - t < 3000) {
+
+    int16_t a, b, c, d, e, f;
+
+    mpu.getMotion6(&a, &b, &c, &d, &e, &f);
+
+    ax += a;
+    ay += b;
+    az += c;
+
+    gx += d;
+    gy += e;
+    gz += f;
+
+    n++;
+
+    delay(2);
+  }
+
+  axO = ax / (float)n;
+  ayO = ay / (float)n;
+  azO = az / (float)n;
+
+  gxO = gx / (float)n;
+  gyO = gy / (float)n;
+  gzO = gz / (float)n;
+
+  Serial.println("Calibration Done");
+
+  // ---------------- WiFi ----------------
+  WiFi.softAP(ssid, password);
+
+  Serial.println("WiFi Started");
+
+  Serial.print("Connect to IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  // ---------------- Server ----------------
+  server.on("/", handleRoot);
+  server.on("/data", handleData);
+  server.on("/download", handleDownload);
+
+  server.begin();
+
+  Serial.println(
+    "sno,timestamp,swing_count,ax,ay,az,gx,gy,gz,speed,impact,duration,validity,stroke_type,intensity"
+  );
+
+  Serial.print("DATASET LABELS: ");
+  Serial.print(DATA_VALIDITY);
+  Serial.print(" | ");
+  Serial.print(DATA_STROKE);
+  Serial.print(" | ");
+  Serial.println(DATA_INTENSITY);
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+void loop() {
+
+  server.handleClient();
+
+  int16_t ax, ay, az, gx, gy, gz;
+
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  // ---------- Accelerometer ----------
+  float Ax = (ax - axO) / 16384.0;
+  float Ay = (ay - ayO) / 16384.0;
+  float Az = (az - azO) / 16384.0;
+
+  // ---------- Gyroscope ----------
+  float Gx = (gx - gxO) / 16.4;
+  float Gy = (gy - gyO) / 16.4;
+  float Gz = (gz - gzO) / 16.4;
+
+  // ---------- Gravity Removal ----------
+  gravity = alpha * gravity + (1 - alpha) * Az;
+
+  float linAccX = Ax * 9.81;
+  float linAccY = Ay * 9.81;
+  float linAccZ = (Az - gravity) * 9.81;
+
+  float totalAcc = sqrt(
+    linAccX * linAccX +
+    linAccY * linAccY +
+    linAccZ * linAccZ
+  );
+
+  // ---------- Peak Rotational Speed ----------
+  float angularVelocity =
+    sqrt(Gx * Gx + Gy * Gy + Gz * Gz);
+
+  // Same stable speed logic
+  float instantSpeed = angularVelocity * 0.03;
+
+  unsigned long now = millis();
+
+  // =================================================
+  // START SWING
+  // =================================================
+  if (!swing &&
+      totalAcc > START_THRESHOLD &&
+      angularVelocity > 120 &&
+      (now - lastSwingEnd > COOLDOWN)) {
+
+    swing = true;
+
+    swingStart = now;
+
+    peakSpeed = 0;
+
+    maxImpact = totalAcc;
+
+    digitalWrite(LED_PIN, HIGH);
+  }
+
+  // =================================================
+  // DURING SWING
+  // =================================================
+  if (swing) {
+
+    if (instantSpeed > peakSpeed)
+      peakSpeed = instantSpeed;
+
+    if (totalAcc > maxImpact)
+      maxImpact = totalAcc;
+
+    float duration =
+      (now - swingStart) / 1000.0;
+
+    // =================================================
+    // SAFETY TIMEOUT
+    // =================================================
+    if (duration > 1.2) {
+
+      swing = false;
+
+      lastSwingEnd = now;
+
+      digitalWrite(LED_PIN, LOW);
+    }
+
+    // =================================================
+    // END SWING
+    // =================================================
+    if ((totalAcc < END_THRESHOLD &&
+         angularVelocity < 60) &&
+         duration > 0.25) {
+
+      swingCount++;
+
+      // update live data
+      live_time = now;
+
+      live_ax = Ax;
+      live_ay = Ay;
+      live_az = Az;
+
+      live_gx = Gx;
+      live_gy = Gy;
+      live_gz = Gz;
+
+      live_speed = peakSpeed;
+
+      live_impact = maxImpact;
+
+      live_duration = duration;
+
+      // ---------- Serial Output ----------
+      Serial.print(swingCount);
+      Serial.print(",");
+
+      Serial.print(now);
+      Serial.print(",");
+
+      Serial.print(swingCount);
+      Serial.print(",");
+
+      Serial.print(Ax, 2);
+      Serial.print(",");
+
+      Serial.print(Ay, 2);
+      Serial.print(",");
+
+      Serial.print(Az, 2);
+      Serial.print(",");
+
+      Serial.print(Gx, 2);
+      Serial.print(",");
+
+      Serial.print(Gy, 2);
+      Serial.print(",");
+
+      Serial.print(Gz, 2);
+      Serial.print(",");
+
+      Serial.print(peakSpeed, 2);
+      Serial.print(",");
+
+      Serial.print(maxImpact, 2);
+      Serial.print(",");
+
+      Serial.print(duration, 2);
+      Serial.print(",");
+
+      Serial.print(DATA_VALIDITY);
+      Serial.print(",");
+
+      Serial.print(DATA_STROKE);
+      Serial.print(",");
+
+      Serial.println(DATA_INTENSITY);
+
+      // ---------- CSV Save ----------
+      csvData += String(swingCount);
+      csvData += ",";
+
+      csvData += String(now);
+      csvData += ",";
+
+      csvData += String(swingCount);
+      csvData += ",";
+
+      csvData += String(Ax);
+      csvData += ",";
+
+      csvData += String(Ay);
+      csvData += ",";
+
+      csvData += String(Az);
+      csvData += ",";
+
+      csvData += String(Gx);
+      csvData += ",";
+
+      csvData += String(Gy);
+      csvData += ",";
+
+      csvData += String(Gz);
+      csvData += ",";
+
+      csvData += String(peakSpeed);
+      csvData += ",";
+
+      csvData += String(maxImpact);
+      csvData += ",";
+
+      csvData += String(duration);
+      csvData += ",";
+
+      csvData += DATA_VALIDITY;
+      csvData += ",";
+
+      csvData += DATA_STROKE;
+      csvData += ",";
+
+      csvData += DATA_INTENSITY;
+      csvData += "\n";
+
+      swing = false;
+
+      lastSwingEnd = now;
+
+      digitalWrite(LED_PIN, LOW);
+    }
+  }
+
+  delay(10);
+}
