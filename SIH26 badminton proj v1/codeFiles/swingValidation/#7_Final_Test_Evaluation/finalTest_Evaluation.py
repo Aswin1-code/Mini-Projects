@@ -22,8 +22,7 @@ r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeF
 )
 
 TUNED_MODEL_FILE = (
-r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\#6_SVM_hyperParameter_Tuning\svm_hyperParameter_tuning.py"
-)
+r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\#6_SVM_hyperParameter_Tuning\swing_validation_model_tuned.pkl")
 
 OUTPUT_DIR = (
 r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\#7_Final_Test_Evaluation"

@@ -1,0 +1,3 @@
+model,accuracy,invalid_rejection,invalid_false_positive_rate,invalid_wrong_as_valid,valid_detection,valid_wrong_as_invalid
+BASELINE MODEL - STEP 4,0.9487179487179487,0.95,0.05,3,0.9444444444444444,1
+TUNED MODEL - STEP 6,0.9487179487179487,0.95,0.05,3,0.9444444444444444,1
