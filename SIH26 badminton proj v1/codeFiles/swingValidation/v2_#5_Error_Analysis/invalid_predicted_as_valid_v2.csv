@@ -1,0 +1,6 @@
+ax,ay,az,gx,gy,gz,speed,impact,duration,actual_validity,predicted_validity,correct
+0.26,-0.22,-1.53,-36.58,-32.42,21.82,57.31,33.27,1.03,INVALID,VALID,False
+-0.34,0.61,0.6,-17.69,45.98,-32.18,9.34,17.91,0.41,INVALID,VALID,False
+-0.69,0.03,-1.04,-7.87,36.12,16.39,67.32,36.71,1.01,INVALID,VALID,False
+0.08,0.41,0.26,20.12,44.82,-28.34,61.17,38.9,1.12,INVALID,VALID,False
+-0.33,0.68,0.03,9.14,11.4,16.66,11.83,17.85,0.91,INVALID,VALID,False

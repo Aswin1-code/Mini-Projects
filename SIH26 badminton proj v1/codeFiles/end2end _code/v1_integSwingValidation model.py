@@ -15,7 +15,7 @@ THRESHOLD_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badmin
 # NEW SWING VALIDATION MODEL
 # =====================================================
 
-VALIDATION_MODEL_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\ML_model_swingValidation\swing_validation_model.pkl"
+VALIDATION_MODEL_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\#6_SVM_hyperParameter_Tuning\swing_validation_model_tuned.pkl"
 VALID_SWINGS_OUTPUT = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\validSwings_classified_op\valid_swings.csv"
 
 # =====================================================

@@ -12,17 +12,11 @@ from sklearn.metrics import confusion_matrix
 # =====================================================
 
 TRAIN_FILE = (
-    r"E:\Mini Project\gitfolder all proj\Mini-Projects"
-    r"\SIH26 badminton proj v1\codeFiles\swingValidation"
-    r"\dataset_swingValidation\#3_Augmented_validation"
-    r"\validation_train_augmented.csv"
+r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\#3_Augmented_Validation\validation_train_augmented.csv"
 )
 
 MODEL_FILE = (
-    r"E:\Mini Project\gitfolder all proj\Mini-Projects"
-    r"\SIH26 badminton proj v1\codeFiles\swingValidation"
-    r"\#6_SVM_hyperParameter_Tuning"
-    r"\swing_validation_model_tuned.pkl"
+r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\swingValidation\#6_SVM_hyperParameter_Tuning\swing_validation_model_tuned.pkl"
 )
 
 OUTPUT_DIR = (
