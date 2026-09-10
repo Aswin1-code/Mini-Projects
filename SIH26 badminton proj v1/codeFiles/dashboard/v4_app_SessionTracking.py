@@ -146,6 +146,321 @@ PRO_DATASET_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badm
 OUTPUT_FILE = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\final_classified_op\final_classified_output_v4.csv"
 
 # =====================================================
+# PLAYER / LONGITUDINAL CSV STORAGE
+# =====================================================
+# One CSV file is maintained per player. Each row = one completed session.
+# No SQLite/database is used.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PLAYER_HISTORY_DIR = os.path.join(BASE_DIR, "players")
+os.makedirs(PLAYER_HISTORY_DIR, exist_ok=True)
+
+LONGITUDINAL_COLUMNS = [
+    "player_id", "player_name", "session_id", "date",
+    "total_swings",
+    "avg_speed", "avg_impact", "avg_power", "avg_efficiency",
+    "weak_count", "medium_count", "strong_count", "strong_percentage",
+    "workload_index", "workload_per_swing",
+    "consistency_score", "stability_score",
+    "beginning_power", "middle_power", "ending_power",
+    "session_power_change_pct",
+    "speed_drop_pct", "impact_drop_pct", "power_drop_pct",
+    "fatigue_related_change",
+    "stroke_drop", "stroke_clear", "stroke_smash", "stroke_drive",
+    "peak_power", "player_level", "player_type"
+]
+
+def safe_filename(value):
+    value = str(value).strip()
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in value)
+    return cleaned.strip("_") or "player"
+
+def player_history_path(player_id, player_name=""):
+    # Player ID is the primary identity. Name is included only for readability.
+    filename = safe_filename(player_id)
+    if player_name:
+        filename += "_" + safe_filename(player_name)
+    return os.path.join(PLAYER_HISTORY_DIR, filename + ".csv")
+
+def find_player_file(player_id):
+    pid = safe_filename(player_id)
+    if not os.path.isdir(PLAYER_HISTORY_DIR):
+        return None
+    matches = [
+        os.path.join(PLAYER_HISTORY_DIR, f)
+        for f in os.listdir(PLAYER_HISTORY_DIR)
+        if f.lower().endswith(".csv") and f.split("_")[0] == pid
+    ]
+    return matches[0] if matches else None
+
+def load_player_history(player_id):
+    path = find_player_file(player_id)
+    if path is None:
+        return pd.DataFrame(columns=LONGITUDINAL_COLUMNS)
+    try:
+        hist = pd.read_csv(path)
+        for col in LONGITUDINAL_COLUMNS:
+            if col not in hist.columns:
+                hist[col] = np.nan
+        return hist[LONGITUDINAL_COLUMNS].sort_values("session_id")
+    except Exception:
+        return pd.DataFrame(columns=LONGITUDINAL_COLUMNS)
+
+def get_next_session_id(player_id):
+    hist = load_player_history(player_id)
+    if hist.empty:
+        return 1
+    ids = pd.to_numeric(hist["session_id"], errors="coerce").dropna()
+    return int(ids.max()) + 1 if len(ids) else 1
+
+def build_session_record(player_id, player_name, session_id, summary,
+                         consistency_scores, stability_score, fatigue,
+                         player_profile, level, df):
+    n = len(df)
+    if n:
+        first_end = max(1, n // 3)
+        mid_start = first_end
+        mid_end = max(mid_start + 1, (2 * n) // 3)
+        beginning_power = float(df.iloc[:first_end]["power"].mean())
+        middle_power = float(df.iloc[mid_start:mid_end]["power"].mean())
+        ending_power = float(df.iloc[mid_end:]["power"].mean())
+    else:
+        beginning_power = middle_power = ending_power = 0.0
+
+    session_power_change = (
+        ((ending_power - beginning_power) / (abs(beginning_power) + 1e-6)) * 100
+        if beginning_power else 0.0
+    )
+
+    # Project-defined badminton workload index:
+    # WEAK=1, MEDIUM=2, STRONG=3.
+    weak = int(summary["weak_count"])
+    medium = int(summary["medium_count"])
+    strong = int(summary["strong_count"])
+    total = max(int(summary["total_swings"]), 1)
+    workload_index = weak + (2 * medium) + (3 * strong)
+
+    strong_pct = (strong / total) * 100
+
+    # "Fatigue-related change" is reported only when performance actually declines
+    # from the early part to the late part of the session.
+    speed_drop = max(0.0, float(fatigue.get("speed_drop", 0)))
+    impact_drop = max(0.0, float(fatigue.get("impact_drop", 0)))
+    power_drop = max(0.0, float(fatigue.get("power_drop", 0)))
+    fatigue_related_change = float(np.mean([speed_drop, impact_drop, power_drop]))
+
+    stroke_counts = df["stroke_type"].value_counts() if "stroke_type" in df.columns else pd.Series(dtype=float)
+
+    return {
+        "player_id": str(player_id),
+        "player_name": str(player_name),
+        "session_id": int(session_id),
+        "date": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_swings": int(summary["total_swings"]),
+        "avg_speed": round(float(summary["avg_speed"]), 3),
+        "avg_impact": round(float(summary["avg_impact"]), 3),
+        "avg_power": round(float(summary["avg_power"]), 3),
+        "avg_efficiency": round(float(summary["avg_efficiency"]), 3),
+        "weak_count": weak,
+        "medium_count": medium,
+        "strong_count": strong,
+        "strong_percentage": round(strong_pct, 2),
+        "workload_index": int(workload_index),
+        "workload_per_swing": round(workload_index / total, 3),
+        "consistency_score": round(float(consistency_scores["consistency_score"]), 2),
+        "stability_score": round(float(stability_score), 2),
+        "beginning_power": round(beginning_power, 3),
+        "middle_power": round(middle_power, 3),
+        "ending_power": round(ending_power, 3),
+        "session_power_change_pct": round(session_power_change, 2),
+        "speed_drop_pct": round(speed_drop, 2),
+        "impact_drop_pct": round(impact_drop, 2),
+        "power_drop_pct": round(power_drop, 2),
+        "fatigue_related_change": round(fatigue_related_change, 2),
+        "stroke_drop": int(stroke_counts.get("DROP", 0)),
+        "stroke_clear": int(stroke_counts.get("CLEAR", 0)),
+        "stroke_smash": int(stroke_counts.get("SMASH", 0)),
+        "stroke_drive": int(stroke_counts.get("DRIVE", 0)),
+        "peak_power": round(float(df["power"].max()), 3) if len(df) else 0.0,
+        "player_level": str(level),
+        "player_type": str(player_profile["player_type"])
+    }
+
+def append_player_session(record):
+    player_id = record["player_id"]
+    player_name = record["player_name"]
+    path = find_player_file(player_id)
+
+    if path is None:
+        path = player_history_path(player_id, player_name)
+
+    if os.path.exists(path):
+        history = pd.read_csv(path)
+        if "session_id" in history.columns:
+            ids = pd.to_numeric(history["session_id"], errors="coerce")
+            if int(record["session_id"]) in ids.dropna().astype(int).tolist():
+                return False, path, "This session ID already exists. Previous session data was not overwritten."
+
+    new_row = pd.DataFrame([record], columns=LONGITUDINAL_COLUMNS)
+
+    if os.path.exists(path):
+        history = pd.read_csv(path)
+        for col in LONGITUDINAL_COLUMNS:
+            if col not in history.columns:
+                history[col] = np.nan
+        history = history[LONGITUDINAL_COLUMNS]
+        history = pd.concat([history, new_row], ignore_index=True)
+    else:
+        history = new_row
+
+    history["session_id"] = pd.to_numeric(history["session_id"], errors="coerce")
+    history = history.sort_values("session_id").reset_index(drop=True)
+    history.to_csv(path, index=False)
+    return True, path, "Session saved successfully."
+
+def percentage_change(first, last):
+    if pd.isna(first) or pd.isna(last) or abs(float(first)) < 1e-9:
+        return np.nan
+    return ((float(last) - float(first)) / abs(float(first))) * 100
+
+def add_longitudinal_derived_metrics(history):
+    h = history.copy()
+    h = h.sort_values("session_id").reset_index(drop=True)
+
+    for col in [
+        "total_swings", "avg_speed", "avg_impact", "avg_power",
+        "avg_efficiency", "strong_percentage", "workload_index",
+        "workload_per_swing", "consistency_score", "stability_score",
+        "beginning_power", "middle_power", "ending_power",
+        "session_power_change_pct", "fatigue_related_change",
+        "stroke_drop", "stroke_clear", "stroke_smash", "stroke_drive",
+        "peak_power"
+    ]:
+        if col in h.columns:
+            h[col] = pd.to_numeric(h[col], errors="coerce")
+
+    # Endurance-related performance maintenance:
+    # positive values mean the player maintained a larger fraction of early power.
+    h["endurance_maintenance_pct"] = np.where(
+        h["beginning_power"].abs() > 1e-9,
+        (h["ending_power"] / h["beginning_power"]) * 100,
+        np.nan
+    )
+
+    # A lower fatigue-related change across sessions is treated as a better trend.
+    if len(h) > 1:
+        h["fatigue_change_from_previous"] = h["fatigue_related_change"].diff()
+        h["power_change_from_previous_pct"] = h["avg_power"].pct_change() * 100
+        h["consistency_change_from_previous"] = h["consistency_score"].diff()
+    else:
+        h["fatigue_change_from_previous"] = np.nan
+        h["power_change_from_previous_pct"] = np.nan
+        h["consistency_change_from_previous"] = np.nan
+
+    return h
+
+def generate_longitudinal_feedback(history):
+    if history.empty:
+        return {
+            "strengths": [],
+            "improvements": [],
+            "training_focus": [],
+            "final_feedback": "No longitudinal session history is available yet."
+        }
+
+    h = add_longitudinal_derived_metrics(history)
+    first = h.iloc[0]
+    last = h.iloc[-1]
+
+    strengths = []
+    improvements = []
+    training_focus = []
+
+    metrics = [
+        ("avg_power", "Swing Power Index"),
+        ("avg_speed", "Motion Speed Index"),
+        ("consistency_score", "Consistency"),
+        ("strong_percentage", "Strong-intensity percentage"),
+        ("total_swings", "Training volume")
+    ]
+
+    for col, label in metrics:
+        if pd.notna(first[col]) and pd.notna(last[col]):
+            change = percentage_change(first[col], last[col])
+            if pd.notna(change):
+                if change >= 10:
+                    strengths.append(f"{label} improved by {change:.1f}% from Session {int(first['session_id'])} to Session {int(last['session_id'])}.")
+                elif change <= -10:
+                    improvements.append(f"{label} decreased by {abs(change):.1f}% across the tracked sessions.")
+
+    if len(h) >= 2:
+        fatigue_first = float(first.get("fatigue_related_change", 0) or 0)
+        fatigue_last = float(last.get("fatigue_related_change", 0) or 0)
+        if fatigue_last < fatigue_first - 2:
+            strengths.append("Fatigue-related performance change is lower in the latest session, suggesting better performance maintenance.")
+        elif fatigue_last > fatigue_first + 5:
+            improvements.append("The latest session shows a larger fatigue-related performance change than the baseline.")
+
+        if float(last.get("endurance_maintenance_pct", 100)) >= 95:
+            strengths.append("Late-session power is being maintained close to early-session power.")
+        elif float(last.get("endurance_maintenance_pct", 100)) < 85:
+            improvements.append("Late-session power falls noticeably below early-session power; endurance-related performance maintenance needs attention.")
+
+    if float(last.get("consistency_score", 0)) < 60:
+        training_focus.append("Work on repeatable swing mechanics and controlled shot execution.")
+    if float(last.get("avg_power", 0)) < float(first.get("avg_power", 0)) * 0.95:
+        training_focus.append("Use progressive power and explosive-swing drills while maintaining technique.")
+    if float(last.get("strong_percentage", 0)) < 20:
+        training_focus.append("Include controlled high-intensity stroke sets to build badminton-specific performance capacity.")
+    if float(last.get("endurance_maintenance_pct", 100)) < 90:
+        training_focus.append("Use interval-based rally drills to improve late-session performance maintenance.")
+    if float(last.get("fatigue_related_change", 0)) > 15:
+        training_focus.append("Monitor performance changes during longer sessions and include adequate recovery between high-intensity sets.")
+
+    if not strengths:
+        strengths.append("The available sessions do not yet show a large improvement in the tracked metrics.")
+    if not improvements:
+        improvements.append("No major negative trend was identified in the available longitudinal metrics.")
+    if not training_focus:
+        training_focus.append("Continue progressive training and monitor the next sessions against the player's personal baseline.")
+
+    # Overall progress score: project-defined, badminton-specific longitudinal indicator.
+    improvement_components = []
+    for col in ["avg_power", "avg_speed", "consistency_score", "strong_percentage"]:
+        change = percentage_change(first[col], last[col])
+        if pd.notna(change):
+            improvement_components.append(np.clip(change, -50, 50))
+    progress = 50 + (np.mean(improvement_components) if improvement_components else 0)
+    progress = float(np.clip(progress, 0, 100))
+
+    final_feedback = (
+        f"Across {len(h)} tracked sessions, the player's badminton-specific performance profile "
+        f"shows an overall longitudinal progress indicator of {progress:.1f}/100. "
+        f"The latest session should be interpreted against the player's own historical baseline, "
+        f"with workload, intensity, consistency, endurance-related performance maintenance and "
+        f"fatigue-related performance changes considered together."
+    )
+
+    return {
+        "strengths": strengths[:6],
+        "improvements": improvements[:6],
+        "training_focus": training_focus[:6],
+        "progress_score": round(progress, 1),
+        "final_feedback": final_feedback
+    }
+
+def longitudinal_stroke_long_table(history):
+    rows = []
+    for _, r in history.iterrows():
+        rows.append({
+            "Session": int(r["session_id"]),
+            "DROP": int(r.get("stroke_drop", 0)),
+            "CLEAR": int(r.get("stroke_clear", 0)),
+            "SMASH": int(r.get("stroke_smash", 0)),
+            "DRIVE": int(r.get("stroke_drive", 0))
+        })
+    return pd.DataFrame(rows)
+
+# =====================================================
 # FEATURE ENGINEERING
 # =====================================================
 def add_features(df):
@@ -172,12 +487,25 @@ def load_stroke_model():
     model_pack = joblib.load(STROKE_MODEL_FILE)
     return model_pack["model"], model_pack["features"]
 
-def load_or_create_threshold():
+def load_or_create_threshold(calibration_df=None):
     if not os.path.exists(THRESHOLD_FILE):
         st.warning("⚠ Threshold file not found. Running calibration...")
-        df = pd.read_csv(CALIBRATION_CSV)
-        df = df[["speed", "impact", "duration"]].dropna()
-        df = df.head(30)
+        if calibration_df is None:
+            if not os.path.exists(CALIBRATION_CSV):
+                raise FileNotFoundError("Calibration CSV not found.")
+            df = pd.read_csv(CALIBRATION_CSV)
+        else:
+            df = calibration_df.copy()
+
+        required = ["speed", "impact", "duration"]
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            raise Exception(f"Calibration CSV missing columns: {missing}")
+
+        df = df[required].dropna().head(30)
+        if len(df) == 0:
+            raise Exception("Calibration CSV contains no usable rows.")
+
         df = add_features(df)
         weak_th = df["power"].quantile(0.25)
         strong_th = df["power"].quantile(0.75)
@@ -584,28 +912,59 @@ def generate_pdf_report(df, summary, comparison, gap_analysis, level, consistenc
 # MAIN CLASSIFIER
 # =====================================================
 @st.cache_data
-def classify():
-    df = pd.read_csv(NEW_DATA_CSV)
-    df = df.dropna()
+def classify(game_bytes=None, calibration_bytes=None):
+    if game_bytes is not None:
+        df = pd.read_csv(io.BytesIO(game_bytes))
+    else:
+        if not os.path.exists(NEW_DATA_CSV):
+            raise FileNotFoundError("Game CSV not found. Upload a game CSV or update NEW_DATA_CSV.")
+        df = pd.read_csv(NEW_DATA_CSV)
+
+    calibration_df = None
+    if calibration_bytes is not None:
+        calibration_df = pd.read_csv(io.BytesIO(calibration_bytes))
+
+    df = df.dropna().copy()
+    required = ["speed", "impact", "duration"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise Exception(f"Game CSV missing columns: {missing}")
+
     df = add_features(df)
     df = add_stroke_features(df)
-    th = load_or_create_threshold()
-    weak_th = th["weak_threshold"][0]
-    strong_th = th["strong_threshold"][0]
+
+    th = load_or_create_threshold(calibration_df)
+    weak_th = th["weak_threshold"].iloc[0]
+    strong_th = th["strong_threshold"].iloc[0]
+
+    # Existing swing model is retained for compatibility with the current app.
     swing_model, swing_features = load_swing_model()
     stroke_model, stroke_features = load_stroke_model()
+
+    missing_swing = [f for f in swing_features if f not in df.columns]
+    if missing_swing:
+        raise Exception(f"Missing swing-model features: {missing_swing}")
+
     X_swing = df[swing_features]
     df["ml_swing"] = swing_model.predict(X_swing)
+
     missing = [f for f in stroke_features if f not in df.columns]
     if missing:
         raise Exception(f"Missing stroke features: {missing}")
+
     X_stroke = df.reindex(columns=stroke_features)
     df["stroke_type"] = stroke_model.predict(X_stroke)
+
     def rule(row):
-        if row["power"] < weak_th: return "WEAK"
-        elif row["power"] < strong_th: return "MEDIUM"
-        else: return "STRONG"
+        if row["power"] < weak_th:
+            return "WEAK"
+        elif row["power"] < strong_th:
+            return "MEDIUM"
+        else:
+            return "STRONG"
+
     df["final_prediction"] = df.apply(rule, axis=1)
+
     summary = get_session_summary(df)
     comparison = compare_with_pro(df)
     gap_analysis, level = generate_gap_analysis(comparison)
@@ -614,7 +973,11 @@ def classify():
     player_profile = classify_player_type(df, summary)
     consistency_scores = compute_consistency_scores(df, summary)
     stability_score = compute_stability_score(df, summary, consistency_scores)
-    return df, summary, comparison, gap_analysis, level, consistency_scores, stability_score, fatigue, player_profile, suggestions
+
+    return (
+        df, summary, comparison, gap_analysis, level, consistency_scores,
+        stability_score, fatigue, player_profile, suggestions
+    )
 
 # =====================================================
 # HELPER UI FUNCTIONS
@@ -664,31 +1027,105 @@ def create_gauge_chart(value, title, max_val=100):
     return fig
 
 # =====================================================
-# SIDEBAR
+# SIDEBAR + SESSION SETUP
 # =====================================================
 with st.sidebar:
     st.markdown("""
     <div style="text-align: center; padding: 20px 0;">
         <h1 style="font-size: 2.5rem; margin-bottom: 0; animation: float 3s ease-in-out infinite;">🏸</h1>
         <h2 style="font-size: 1.2rem; color: #38bdf8; margin-top: 5px;">BADMINTON AI</h2>
-        <p style="color: #94a3b8; font-size: 0.8rem;">Smart Swing Analytics</p>
+        <p style="color: #94a3b8; font-size: 0.8rem;">Smart Swing Analytics + Longitudinal Tracking</p>
     </div>
     """, unsafe_allow_html=True)
+
     st.markdown("---")
-    st.subheader("🎮 Controls")
-    session_option = st.selectbox("📁 Session", ["Current Session", "Session 1", "Session 2", "Session 3"], index=0)
-    stroke_filter = st.multiselect("🏸 Stroke Filter", ["SMASH", "DROP", "CLEAR", "DRIVE"], default=["SMASH", "DROP", "CLEAR", "DRIVE"])
-    metric_toggle = st.radio("📊 Primary Metric", options=["Speed", "Impact", "Power"], horizontal=True, index=2)
+    st.subheader("👤 Player & Session")
+
+    player_id = st.text_input(
+        "Player ID",
+        value=st.session_state.get("player_id", "P001"),
+        help="Unique ID used to identify the player's longitudinal CSV."
+    ).strip()
+
+    player_name = st.text_input(
+        "Player Name",
+        value=st.session_state.get("player_name", ""),
+        help="Used for display and for the first player CSV filename."
+    ).strip()
+
+    if player_id:
+        existing_history = load_player_history(player_id)
+        auto_session = get_next_session_id(player_id)
+        if existing_history.empty:
+            st.caption("🆕 New player — Session 1 will be created.")
+        else:
+            st.caption(f"📚 Existing player — {len(existing_history)} saved session(s).")
+            st.caption(f"Next available session: **{auto_session}**")
+    else:
+        existing_history = pd.DataFrame(columns=LONGITUDINAL_COLUMNS)
+        auto_session = 1
+
+    session_id = st.number_input(
+        "Session ID",
+        min_value=1,
+        value=int(auto_session),
+        step=1,
+        help="Previous sessions are never overwritten. Use the next available ID for a new session."
+    )
+
+    st.markdown("---")
+    st.subheader("📂 Sensor Data")
+
+    calibration_upload = st.file_uploader(
+        "Calibration CSV",
+        type=["csv"],
+        key="calibration_upload",
+        help="Optional if your existing thresholdFile.csv is already available."
+    )
+
+    game_upload = st.file_uploader(
+        "Game / Session CSV",
+        type=["csv"],
+        key="game_upload",
+        help="Upload the raw session CSV downloaded from the ESP32 dashboard."
+    )
+
+    use_uploaded = st.checkbox(
+        "Use uploaded CSV files",
+        value=True,
+        help="When enabled, uploaded files are used. If disabled or files are missing, the existing configured CSV paths are used."
+    )
+
+    st.markdown("---")
+    st.subheader("🎮 Analytics Controls")
+    session_option = st.selectbox(
+        "📁 Session View",
+        ["Current Session"] + [f"Session {i}" for i in range(1, 11)],
+        index=0
+    )
+    stroke_filter = st.multiselect(
+        "🏸 Stroke Filter",
+        ["SMASH", "DROP", "CLEAR", "DRIVE"],
+        default=["SMASH", "DROP", "CLEAR", "DRIVE"]
+    )
+    metric_toggle = st.radio(
+        "📊 Primary Metric",
+        options=["Speed", "Impact", "Power"],
+        horizontal=True,
+        index=2
+    )
     player_mode = st.toggle("🔬 Advanced Analytics", value=False)
+
     st.markdown("---")
     st.subheader("⚡ Quick Stats")
-    if 'summary' in st.session_state:
+    if "summary" in st.session_state:
         s = st.session_state.summary
         st.metric("Total Swings", s["total_swings"])
         st.metric("Avg Power", f"{s['avg_power']:.1f}")
         st.metric("Stability", f"{st.session_state.stability_score}/10")
+
     st.markdown("---")
-    st.caption("© 2024 Badminton AI v2.0")
+    st.caption("© 2026 Smart Badminton AI")
 
 # =====================================================
 # MAIN CONTENT
@@ -699,13 +1136,32 @@ st.markdown("""
                -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
         🏸 SMART BADMINTON AI DASHBOARD
     </h1>
-    <p style="color: #94a3b8; font-size: 1.1rem;">Advanced Swing Analytics & AI Coaching System</p>
+    <p style="color: #94a3b8; font-size: 1.1rem;">
+        Advanced Swing Analytics • AI Coaching • Longitudinal Fitness & Performance Tracking
+    </p>
 </div>
 """, unsafe_allow_html=True)
 
+# Persist player identity in session state.
+st.session_state.player_id = player_id
+st.session_state.player_name = player_name
+st.session_state.session_id = int(session_id)
+
+game_bytes = None
+calibration_bytes = None
+
+if use_uploaded and game_upload is not None:
+    game_bytes = game_upload.getvalue()
+if use_uploaded and calibration_upload is not None:
+    calibration_bytes = calibration_upload.getvalue()
+
 with st.spinner("🤖 Analyzing your swings with AI..."):
     try:
-        df, summary, comparison, gap_analysis, level, consistency_scores, stability_score, fatigue, player_profile, suggestions = classify()
+        (
+            df, summary, comparison, gap_analysis, level, consistency_scores,
+            stability_score, fatigue, player_profile, suggestions
+        ) = classify(game_bytes, calibration_bytes)
+
         st.session_state.summary = summary
         st.session_state.stability_score = stability_score
         st.session_state.df = df
@@ -716,9 +1172,37 @@ with st.spinner("🤖 Analyzing your swings with AI..."):
         st.session_state.fatigue = fatigue
         st.session_state.player_profile = player_profile
         st.session_state.suggestions = suggestions
+
     except Exception as e:
         st.error(f"❌ Error during classification: {e}")
+        st.info(
+            "Check that the Game CSV contains speed, impact and duration columns, "
+            "and that the configured model/threshold files are accessible."
+        )
         st.stop()
+
+# Save this completed session to the player's longitudinal CSV.
+# This happens once per unique Player ID + Session ID. Existing sessions are never overwritten.
+if player_id and player_name:
+    session_record = build_session_record(
+        player_id, player_name, int(session_id), summary,
+        consistency_scores, stability_score, fatigue,
+        player_profile, level, df
+    )
+
+    save_key = f"{safe_filename(player_id)}_{int(session_id)}"
+    if st.session_state.get("last_saved_session_key") != save_key:
+        saved, history_path, message = append_player_session(session_record)
+        if saved:
+            st.session_state.last_saved_session_key = save_key
+            st.success(f"✅ Session {int(session_id)} saved to player history.")
+        elif "already exists" in message:
+            # Do not overwrite an existing session.
+            st.warning(f"ℹ️ {message}")
+            st.session_state.last_saved_session_key = save_key
+else:
+    st.warning("⚠ Enter both Player ID and Player Name to enable longitudinal CSV logging.")
+
 
 if stroke_filter:
     df_filtered = df[df["stroke_type"].isin(stroke_filter)].copy()
@@ -736,7 +1220,8 @@ summary_filtered = get_session_summary(df_filtered)
 # =====================================================
 tabs = st.tabs([
     "📊 Overview", "📈 Performance", "🏆 Pro Comparison",
-    "🧠 AI Coach", "🧬 Player Profile", "⚡ Fatigue & Consistency", "📥 Export Data"
+    "🧠 AI Coach", "🧬 Player Profile", "⚡ Fatigue & Consistency",
+    "📥 Export Data", "📅 Longitudinal Analysis"
 ])
 
 # ==================== TAB 1: OVERVIEW ====================
@@ -1316,6 +1801,259 @@ AI COACH RECOMMENDATIONS:
             "final_prediction": st.column_config.TextColumn("Prediction")
         }
     )
+
+
+# ==================== TAB 8: LONGITUDINAL ANALYSIS ====================
+with tabs[7]:
+    st.markdown("### 📅 Longitudinal Fitness & Performance Analysis")
+    st.markdown(
+        "Track how the player's badminton-specific performance and fitness-related indicators "
+        "change across multiple sessions. This analysis uses the player's own historical baseline."
+    )
+
+    selected_player_id = st.text_input(
+        "Player ID to analyze",
+        value=player_id,
+        key="longitudinal_player_id"
+    ).strip()
+
+    history = load_player_history(selected_player_id) if selected_player_id else pd.DataFrame(columns=LONGITUDINAL_COLUMNS)
+
+    if history.empty:
+        st.info(
+            "📭 No saved sessions found for this player yet. "
+            "Complete a session with Player ID + Name to create the longitudinal CSV."
+        )
+    else:
+        history = add_longitudinal_derived_metrics(history)
+        feedback = generate_longitudinal_feedback(history)
+
+        st.markdown("---")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Sessions Tracked", len(history))
+        c2.metric("Latest Avg Power", f"{history.iloc[-1]['avg_power']:.1f}")
+        c3.metric("Latest Consistency", f"{history.iloc[-1]['consistency_score']:.1f}/100")
+        c4.metric("Progress Indicator", f"{feedback['progress_score']:.1f}/100")
+
+        st.markdown("---")
+        st.markdown("#### 📈 Performance Progression")
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=history["session_id"], y=history["avg_power"],
+            mode="lines+markers", name="Swing Power Index",
+            line=dict(width=3)
+        ))
+        fig.add_trace(go.Scatter(
+            x=history["session_id"], y=history["avg_speed"],
+            mode="lines+markers", name="Motion Speed Index",
+            yaxis="y2", line=dict(width=3)
+        ))
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.3)",
+            font=dict(color="#e2e8f0"),
+            xaxis_title="Session",
+            yaxis=dict(title="Swing Power Index"),
+            yaxis2=dict(title="Motion Speed Index", overlaying="y", side="right"),
+            height=450,
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig, use_container_width=True, key="long_perf")
+
+        st.markdown("#### 🎯 Consistency & Workload")
+
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(
+            x=history["session_id"], y=history["consistency_score"],
+            mode="lines+markers", name="Consistency Score"
+        ))
+        fig2.add_trace(go.Scatter(
+            x=history["session_id"], y=history["workload_per_swing"] * 30,
+            mode="lines+markers", name="Workload / Swing ×30"
+        ))
+        fig2.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.3)",
+            font=dict(color="#e2e8f0"),
+            xaxis_title="Session",
+            yaxis_title="Index / Score",
+            height=380,
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig2, use_container_width=True, key="long_consistency")
+
+        st.markdown("#### 💪 Training Workload & Intensity Profile")
+        workload_fig = go.Figure()
+        workload_fig.add_trace(go.Bar(
+            x=history["session_id"], y=history["weak_count"],
+            name="Weak"
+        ))
+        workload_fig.add_trace(go.Bar(
+            x=history["session_id"], y=history["medium_count"],
+            name="Medium"
+        ))
+        workload_fig.add_trace(go.Bar(
+            x=history["session_id"], y=history["strong_count"],
+            name="Strong"
+        ))
+        workload_fig.update_layout(
+            barmode="stack",
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.3)",
+            font=dict(color="#e2e8f0"),
+            xaxis_title="Session",
+            yaxis_title="Number of Swings",
+            height=400
+        )
+        st.plotly_chart(workload_fig, use_container_width=True, key="long_workload")
+
+        st.markdown("#### 🔋 Endurance-Related Performance Maintenance")
+        endurance_fig = go.Figure()
+        endurance_fig.add_trace(go.Scatter(
+            x=history["session_id"], y=history["endurance_maintenance_pct"],
+            mode="lines+markers", name="Late / Early Power (%)"
+        ))
+        endurance_fig.add_hline(
+            y=100, line_dash="dash",
+            annotation_text="100% = late-session power matches early-session power"
+        )
+        endurance_fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.3)",
+            font=dict(color="#e2e8f0"),
+            xaxis_title="Session",
+            yaxis_title="Performance Maintenance (%)",
+            height=380
+        )
+        st.plotly_chart(endurance_fig, use_container_width=True)
+
+        st.markdown("#### 😮‍💨 Fatigue-Related Performance Change")
+        fatigue_fig = go.Figure()
+        fatigue_fig.add_trace(go.Scatter(
+            x=history["session_id"], y=history["fatigue_related_change"],
+            mode="lines+markers", name="Fatigue-Related Change"
+        ))
+        fatigue_fig.add_hline(
+            y=0, line_dash="dash",
+            annotation_text="0% = no observed decline in tracked performance indicators"
+        )
+        fatigue_fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.3)",
+            font=dict(color="#e2e8f0"),
+            xaxis_title="Session",
+            yaxis_title="Observed Performance Change (%)",
+            height=380
+        )
+        st.plotly_chart(fatigue_fig, use_container_width=True)
+
+        st.markdown("#### 🏸 Stroke Development")
+        stroke_long = longitudinal_stroke_long_table(history)
+        stroke_fig = go.Figure()
+        for stroke in ["DROP", "CLEAR", "SMASH", "DRIVE"]:
+            stroke_fig.add_trace(go.Scatter(
+                x=stroke_long["Session"], y=stroke_long[stroke],
+                mode="lines+markers", name=stroke
+            ))
+        stroke_fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.3)",
+            font=dict(color="#e2e8f0"),
+            xaxis_title="Session",
+            yaxis_title="Stroke Count",
+            height=420
+        )
+        st.plotly_chart(stroke_fig, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("#### 📊 First Session vs Latest Session")
+
+        first = history.iloc[0]
+        latest = history.iloc[-1]
+        comparison_rows = []
+
+        for col, label in [
+            ("avg_speed", "Motion Speed Index"),
+            ("avg_impact", "Impact Index"),
+            ("avg_power", "Swing Power Index"),
+            ("consistency_score", "Consistency Score"),
+            ("strong_percentage", "Strong-Intensity %"),
+            ("total_swings", "Total Swings"),
+            ("workload_index", "Workload Index"),
+            ("endurance_maintenance_pct", "Endurance Maintenance %"),
+            ("fatigue_related_change", "Fatigue-Related Change %")
+        ]:
+            first_val = float(first[col])
+            latest_val = float(latest[col])
+            change = percentage_change(first_val, latest_val)
+            comparison_rows.append({
+                "Metric": label,
+                f"Session {int(first['session_id'])}": round(first_val, 2),
+                f"Session {int(latest['session_id'])}": round(latest_val, 2),
+                "Change %": round(change, 2) if pd.notna(change) else np.nan
+            })
+
+        st.dataframe(
+            pd.DataFrame(comparison_rows),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.markdown("---")
+        fb1, fb2 = st.columns(2)
+
+        with fb1:
+            st.markdown("#### ✅ Strengths / Improvements")
+            st.markdown("**Strengths**")
+            for item in feedback["strengths"]:
+                st.success(item)
+
+            st.markdown("**Areas to Improve**")
+            for item in feedback["improvements"]:
+                st.warning(item)
+
+        with fb2:
+            st.markdown("#### 🎯 Recommended Training Focus")
+            for item in feedback["training_focus"]:
+                st.info(item)
+
+            st.markdown("#### 📝 Final Longitudinal Feedback")
+            st.markdown(f"""
+            <div style="background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+                        border-radius: 16px; padding: 22px;
+                        border: 1px solid rgba(56,189,248,0.3);">
+                <p style="color:#e2e8f0; line-height:1.7; margin:0;">
+                    {feedback["final_feedback"]}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("#### 📋 Complete Session History")
+        display_history = history.copy()
+        st.dataframe(display_history, use_container_width=True, hide_index=True)
+
+        history_csv = history[LONGITUDINAL_COLUMNS].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Download Player Longitudinal CSV",
+            data=history_csv,
+            file_name=f"{safe_filename(selected_player_id)}_longitudinal_history.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+        st.caption(
+            "Note: Workload, Swing Power Index, Impact Efficiency Index, endurance-maintenance, "
+            "fatigue-related change and progress are project-defined performance indicators. "
+            "They are not direct physiological measurements or medical diagnoses."
+        )
 
 # =====================================================
 # FOOTER
