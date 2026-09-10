@@ -313,7 +313,7 @@ if (!swing &&
     swing = true;
     swingStart = now;
 
-    peakSpeed = 0;        // 🔥 FIXED
+    peakSpeed = 0;      
     maxImpact = totalAcc;
 
     digitalWrite(LED_PIN, HIGH);
