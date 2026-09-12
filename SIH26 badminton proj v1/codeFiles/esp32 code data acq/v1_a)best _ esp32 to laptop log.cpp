@@ -331,7 +331,7 @@ if (!swing &&
       maxImpact = totalAcc;
 
     float duration = (now - swingStart) / 1000.0;
-    // 🔥 SAFETY TIMEOUT (ADD HERE)
+    // SAFETY TIMEOUT
     if (duration > 1.2) {
       swing = false;
       lastSwingEnd = now;

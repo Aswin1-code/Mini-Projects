@@ -12,8 +12,8 @@ MPU6050 mpu;
 // =====================================================
 
 // ---------------- WiFi AP ----------------
-const char* ssid = "ESP32_Swing";
-const char* password = "12345678";
+const char* ssid = "Badminton AI";
+const char* password = "hello123";
 
 WebServer server(80);
 
@@ -21,11 +21,11 @@ WebServer server(80);
 #define LED_PIN 2
 
 // ---------------- Detection Thresholds ----------------
-float START_THRESHOLD = 15.0;
-float END_THRESHOLD   = 7.0;
+float START_THRESHOLD = 17.0;
+float END_THRESHOLD   = 8.5;
 
-float MIN_DURATION = 0.20;
-unsigned long COOLDOWN = 400;
+float MIN_DURATION = 0.25;
+unsigned long COOLDOWN = 350;
 
 // ---------------- Offsets ----------------
 float axO = 0;
@@ -65,7 +65,14 @@ float live_duration = 0;
 unsigned long live_time = 0;
 int swingCount = 0;
 
+// =====================================================
+// SESSION TIMING (for Session Duration)
+// =====================================================
+unsigned long sessionStartMs = 0;   // millis() of first swing
+bool sessionStarted = false;
+
 // ---------------- CSV Storage ----------------
+// timestamp = milliseconds since FIRST swing of the session
 String csvData =
 "timestamp,ax,ay,az,gx,gy,gz,speed,impact,duration\n";
 
@@ -112,6 +119,7 @@ button {
 }
 </style>
 </head>
+
 <body>
 
 <h1>🏸 Badminton Swing Dashboard</h1>
@@ -119,19 +127,9 @@ button {
 <div class="box">
 
   <p id="time">Timestamp : --</p>
-
-  <p id="ax">AX : --</p>
-  <p id="ay">AY : --</p>
-  <p id="az">AZ : --</p>
-
-  <p id="gx">GX : --</p>
-  <p id="gy">GY : --</p>
-  <p id="gz">GZ : --</p>
-
   <p id="speed">Speed : -- km/h</p>
   <p id="impact">Impact : -- m/s²</p>
   <p id="duration">Duration : -- sec</p>
-
   <p id="count">Swing Count : 0</p>
 
   <button onclick="downloadCSV()">Download CSV</button>
@@ -146,29 +144,11 @@ async function updateData() {
   document.getElementById("time").innerText =
     "Timestamp : " + data.time;
 
-  document.getElementById("ax").innerText =
-    "AX : " + data.ax.toFixed(2);
-
-  document.getElementById("ay").innerText =
-    "AY : " + data.ay.toFixed(2);
-
-  document.getElementById("az").innerText =
-    "AZ : " + data.az.toFixed(2);
-
-  document.getElementById("gx").innerText =
-    "GX : " + data.gx.toFixed(2);
-
-  document.getElementById("gy").innerText =
-    "GY : " + data.gy.toFixed(2);
-
-  document.getElementById("gz").innerText =
-    "GZ : " + data.gz.toFixed(2);
-
   document.getElementById("speed").innerText =
-    "Speed : " + data.speed.toFixed(2) + " km/h";
+    "Speed : " + data.speed.toFixed(2);
 
   document.getElementById("impact").innerText =
-    "Impact : " + data.impact.toFixed(2) + " m/s²";
+    "Impact : " + data.impact.toFixed(2);
 
   document.getElementById("duration").innerText =
     "Duration : " + data.duration.toFixed(2) + " sec";
@@ -177,7 +157,6 @@ async function updateData() {
     "Swing Count : " + data.count;
 }
 
-// Fast refresh with low lag
 setInterval(updateData, 100);
 
 function downloadCSV() {
@@ -200,19 +179,9 @@ void handleData() {
   String json = "{";
 
   json += "\"time\":" + String(live_time) + ",";
-
-  json += "\"ax\":" + String(live_ax) + ",";
-  json += "\"ay\":" + String(live_ay) + ",";
-  json += "\"az\":" + String(live_az) + ",";
-
-  json += "\"gx\":" + String(live_gx) + ",";
-  json += "\"gy\":" + String(live_gy) + ",";
-  json += "\"gz\":" + String(live_gz) + ",";
-
   json += "\"speed\":" + String(live_speed) + ",";
   json += "\"impact\":" + String(live_impact) + ",";
   json += "\"duration\":" + String(live_duration) + ",";
-
   json += "\"count\":" + String(swingCount);
 
   json += "}";
@@ -240,6 +209,7 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
 
   mpu.initialize();
+  mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
 
   if (!mpu.testConnection()) {
     Serial.println("MPU6050 FAILED");
@@ -315,9 +285,9 @@ void loop() {
   float Az = (az - azO) / 16384.0;
 
   // ---------- Gyroscope ----------
-  float Gx = (gx - gxO) / 131.0;
-  float Gy = (gy - gyO) / 131.0;
-  float Gz = (gz - gzO) / 131.0;
+  float Gx = (gx - gxO) / 16.4;
+  float Gy = (gy - gyO) / 16.4;
+  float Gz = (gz - gzO) / 16.4;
 
   // ---------- Gravity Removal ----------
   gravity = alpha * gravity + (1 - alpha) * Az;
@@ -333,14 +303,10 @@ void loop() {
   );
 
   // ---------- Peak Rotational Speed ----------
-  float angularVelocity = sqrt(
-    Gx * Gx +
-    Gy * Gy +
-    Gz * Gz
-  );
+  float angularVelocity = sqrt(Gx*Gx + Gy*Gy + Gz*Gz);
 
   // Same stable speed logic
-  float instantSpeed = angularVelocity * 0.12;
+  float instantSpeed = angularVelocity * 0.03;
 
   unsigned long now = millis();
 
@@ -349,12 +315,13 @@ void loop() {
   // =================================================
   if (!swing &&
       totalAcc > START_THRESHOLD &&
+      angularVelocity > 120 &&
       (now - lastSwingEnd > COOLDOWN)) {
 
     swing = true;
     swingStart = now;
 
-    peakSpeed = instantSpeed;
+    peakSpeed = 0;
     maxImpact = totalAcc;
 
     digitalWrite(LED_PIN, HIGH);
@@ -373,16 +340,29 @@ void loop() {
 
     float duration = (now - swingStart) / 1000.0;
 
+    // SAFETY TIMEOUT
+    if (duration > 1.2) {
+      swing = false;
+      lastSwingEnd = now;
+      digitalWrite(LED_PIN, LOW);
+    }
+
     // =================================================
     // END SWING
     // =================================================
-    if (totalAcc < END_THRESHOLD &&
-        duration > MIN_DURATION) {
+    if ((totalAcc < END_THRESHOLD && angularVelocity < 60) && duration > 0.25) {
 
       swingCount++;
 
+      // ---------- Session timing (first swing = 0) ----------
+      if (!sessionStarted) {
+        sessionStartMs = now;      // time of first completed swing
+        sessionStarted = true;
+      }
+      unsigned long elapsedMs = now - sessionStartMs;   // ms since first swing
+
       // update live data
-      live_time = now;
+      live_time = elapsedMs;       // show elapsed time on web dashboard
 
       live_ax = Ax;
       live_ay = Ay;
@@ -397,7 +377,7 @@ void loop() {
       live_duration = duration;
 
       // ---------- Serial Output ----------
-      Serial.print(now); Serial.print(",");
+      Serial.print(elapsedMs); Serial.print(",");
       Serial.print(Ax, 2); Serial.print(",");
       Serial.print(Ay, 2); Serial.print(",");
       Serial.print(Az, 2); Serial.print(",");
@@ -409,7 +389,7 @@ void loop() {
       Serial.println(duration, 2);
 
       // ---------- CSV Save ----------
-      csvData += String(now) + ",";
+      csvData += String(elapsedMs) + ",";
       csvData += String(Ax) + ",";
       csvData += String(Ay) + ",";
       csvData += String(Az) + ",";
@@ -429,19 +409,3 @@ void loop() {
 
   delay(10);
 }
-
-
-
-
-/*
-| Problem                 | Fix               |
-| ---------------------   | ----------------- |
-| Too many false swings   | ↑ angularVelocity |
-| Missing real swings     | ↓ angularVelocity |
-| Too sensitive           | ↑ START_THRESHOLD |
-| Too slow detection      | ↓ MIN_DURATION    |
-
-
-
-
-*/
