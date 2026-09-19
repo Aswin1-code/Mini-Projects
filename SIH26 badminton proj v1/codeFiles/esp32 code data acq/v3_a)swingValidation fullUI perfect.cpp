@@ -132,6 +132,35 @@ unsigned long cooldownStartTime = 0;
 unsigned long lastSwingDuration = 0;
 
 unsigned long swingCount = 0;
+// =====================================================
+// SESSION-RELATIVE MILLIS TIMING
+// =====================================================
+
+// Session begins at the first detected swing.
+bool sessionStarted = false;
+unsigned long sessionStartMillis = 0;
+
+// Convert raw ESP32 millis() to session-relative time.
+unsigned long getSessionMillis()
+{
+    if (!sessionStarted)
+    {
+        return 0;
+    }
+
+    return millis() - sessionStartMillis;
+}
+
+// Convert a previously captured raw millis() timestamp.
+unsigned long toSessionMillis(unsigned long rawTime)
+{
+    if (!sessionStarted)
+    {
+        return 0;
+    }
+
+    return rawTime - sessionStartMillis;
+}
 
 // Peak-event snapshots.
 // Speed and acceleration peaks may happen at different samples.
@@ -920,8 +949,16 @@ void processSwing()
 
         if (startCondition())
         {
+            // Start session timer at the first detected swing.
+            if (!sessionStarted)
+            {
+                sessionStartMillis = now;
+                sessionStarted = true;
+            }
+
             swingState = ACTIVE;
 
+            // Keep raw millis() internally for FSM calculations.
             swingStartTime = now;
 
             endConditionStartTime = 0;
@@ -1107,15 +1144,17 @@ void completeSwing(
         records[recordCount].swing_count =
             swingCount;
 
+        // Session-relative timestamps in milliseconds.
         records[recordCount].timestamp_ms =
-            completionTime;
+            toSessionMillis(completionTime);
 
         records[recordCount].start_time_ms =
-            swingStartTime;
+            toSessionMillis(swingStartTime);
 
         records[recordCount].end_time_ms =
-            completionTime;
+            toSessionMillis(completionTime);
 
+        // Duration is still calculated using raw millis().
         records[recordCount].duration_ms =
             duration;
 
@@ -1173,6 +1212,18 @@ void completeSwing(
 
     Serial.print("SWING #");
     Serial.println(swingCount);
+
+    Serial.print("Session timestamp (ms): ");
+    Serial.println(toSessionMillis(completionTime));
+
+    Serial.print("Swing start (session ms): ");
+    Serial.println(toSessionMillis(swingStartTime));
+
+    Serial.print("Swing end (session ms): ");
+    Serial.println(toSessionMillis(completionTime));
+
+    Serial.print("Swing duration (ms): ");
+    Serial.println(duration);
 
     Serial.print("Speed: ");
     Serial.println(speed);
@@ -1359,6 +1410,12 @@ s
 </p>
 
 <p>
+Session Elapsed:
+<span id="sessionElapsed" class="value">0</span>
+ms
+</p>
+
+<p>
 MPU INT detected for current swing:
 <span id="intFlag" class="value">0</span>
 </p>
@@ -1514,6 +1571,10 @@ async function updateData()
             Number(d.duration).toFixed(2);
 
         document.getElementById(
+            'sessionElapsed'
+        ).innerText = d.sessionElapsedMs;
+
+        document.getElementById(
             'currentPeakAcc'
         ).innerText =
             Number(d.currentPeakAcc).toFixed(2);
@@ -1663,6 +1724,9 @@ void handleData()
 
     json += ",\"duration\":";
     json += String(lastSwingDuration / 1000.0, 2);
+
+    json += ",\"sessionElapsedMs\":";
+    json += String(getSessionMillis());
 
     json += ",\"currentPeakAcc\":";
     json += String(peakAcceleration, 2);
