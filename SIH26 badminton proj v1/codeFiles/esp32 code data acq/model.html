@@ -1,0 +1,397 @@
+
+<html>
+
+<head>
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1">
+
+<title>Badminton AI</title>
+
+<style>
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f2f2f2;
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 900px;
+    margin: auto;
+}
+
+h1 {
+    text-align: center;
+}
+
+.card {
+    background: white;
+    padding: 20px;
+    margin: 15px 0;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.value {
+    font-size: 22px;
+    font-weight: bold;
+}
+
+button {
+    padding: 12px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+input, select {
+    padding: 10px;
+    margin: 5px 0 12px 0;
+    font-size: 16px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+label {
+    font-weight: bold;
+}
+
+.status {
+    font-weight: bold;
+    color: #2457a7;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🏸 Badminton AI</h1>
+
+<div class="card">
+
+<h2>Live Sensor</h2>
+
+<p>
+Acceleration:
+<span id="acceleration" class="value">0</span>
+m/s²
+</p>
+
+<p>
+Angular Velocity:
+<span id="gyro" class="value">0</span>
+deg/s
+</p>
+
+<p>
+Instant Speed:
+<span id="speed" class="value">0</span>
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Swing Detection</h2>
+
+<p>
+State:
+<span id="state" class="value">IDLE</span>
+</p>
+
+<p>
+Swing Count:
+<span id="count" class="value">0</span>
+</p>
+
+<p>
+Peak Speed:
+<span id="peakSpeed" class="value">0</span>
+</p>
+
+<p>
+Peak Impact:
+<span id="impact" class="value">0</span>
+</p>
+
+<p>
+Duration:
+<span id="duration" class="value">0</span>
+s
+</p>
+
+<p>
+Session Elapsed:
+<span id="sessionElapsed" class="value">0</span>
+ms
+</p>
+
+<p>
+MPU INT detected for current swing:
+<span id="intFlag" class="value">0</span>
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Current Peaks</h2>
+
+<p>
+Current Peak Acceleration:
+<span id="currentPeakAcc">0</span>
+m/s²
+</p>
+
+<p>
+Current Peak Speed:
+<span id="currentPeakSpeed">0</span>
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Batch Label</h2>
+
+<p>
+Set the label once before recording a batch.
+</p>
+
+<label for="hitLabel">Swing label</label>
+
+<select id="hitLabel">
+    <option value="0">0 - Free swing</option>
+    <option value="1">1 - Real shuttle hit</option>
+</select>
+
+<button onclick="applySettings()">
+Apply label and INT settings
+</button>
+
+<p id="settingsStatus" class="status">
+Current settings loaded from ESP32.
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>MPU6050 Motion INT Calibration</h2>
+
+<p>
+MOT_THR and MOT_DUR configure the MPU6050 motion
+interrupt. They are separate from the swing FSM thresholds.
+</p>
+
+<label for="motThr">MOT_THR (0-255)</label>
+
+<input
+    type="number"
+    id="motThr"
+    min="0"
+    max="255"
+    value="30">
+
+<label for="motDur">MOT_DUR (0-255 ms)</label>
+
+<input
+    type="number"
+    id="motDur"
+    min="0"
+    max="255"
+    value="1">
+
+<p>
+GPIO 4 is used for the MPU6050 INT input.
+</p>
+
+</div>
+
+<div class="card">
+
+<a href="/download">
+
+<button>
+Download CSV
+</button>
+
+</a>
+
+</div>
+
+</div>
+
+<script>
+
+let settingsInitialized = false;
+
+async function updateData()
+{
+    try
+    {
+        const response =
+            await fetch(
+                '/data?ts=' + Date.now(),
+                {
+                    cache: 'no-store'
+                }
+            );
+
+        const d =
+            await response.json();
+
+        document.getElementById(
+            'acceleration'
+        ).innerText =
+            Number(d.acceleration).toFixed(2);
+
+        document.getElementById(
+            'gyro'
+        ).innerText =
+            Number(d.gyro).toFixed(1);
+
+        document.getElementById(
+            'speed'
+        ).innerText =
+            Number(d.speed).toFixed(2);
+
+        document.getElementById(
+            'state'
+        ).innerText =
+            d.state;
+
+        document.getElementById(
+            'count'
+        ).innerText =
+            d.count;
+
+        document.getElementById(
+            'peakSpeed'
+        ).innerText =
+            Number(d.peakSpeed).toFixed(2);
+
+        document.getElementById(
+            'impact'
+        ).innerText =
+            Number(d.impact).toFixed(2);
+
+        document.getElementById(
+            'duration'
+        ).innerText =
+            Number(d.duration).toFixed(2);
+
+        document.getElementById(
+            'sessionElapsed'
+        ).innerText = d.sessionElapsedMs;
+
+        document.getElementById(
+            'currentPeakAcc'
+        ).innerText =
+            Number(d.currentPeakAcc).toFixed(2);
+
+        document.getElementById(
+            'currentPeakSpeed'
+        ).innerText =
+            Number(d.currentPeakSpeed).toFixed(2);
+
+        document.getElementById(
+            'intFlag'
+        ).innerText =
+            d.intFlag;
+
+        if (!settingsInitialized)
+        {
+            document.getElementById(
+                'hitLabel'
+            ).value = String(d.hitLabel);
+
+            document.getElementById(
+                'motThr'
+            ).value = d.motThr;
+
+            document.getElementById(
+                'motDur'
+            ).value = d.motDur;
+
+            settingsInitialized = true;
+        }
+    }
+    catch(error)
+    {
+        console.log(error);
+    }
+}
+
+async function applySettings()
+{
+    const hit =
+        document.getElementById('hitLabel').value;
+
+    const thr =
+        document.getElementById('motThr').value;
+
+    const dur =
+        document.getElementById('motDur').value;
+
+    const status =
+        document.getElementById('settingsStatus');
+
+    try
+    {
+        const response = await fetch(
+            '/settings?hit=' +
+            encodeURIComponent(hit) +
+            '&thr=' +
+            encodeURIComponent(thr) +
+            '&dur=' +
+            encodeURIComponent(dur) +
+            '&ts=' + Date.now(),
+            {
+                cache: 'no-store'
+            }
+        );
+
+        const result = await response.json();
+
+        if (result.ok)
+        {
+            status.innerText =
+                'Applied. hit_label=' + result.hitLabel +
+                ', MOT_THR=' + result.motThr +
+                ', MOT_DUR=' + result.motDur;
+        }
+        else
+        {
+            status.innerText =
+                'Settings were not applied. Check values.';
+        }
+    }
+    catch(error)
+    {
+        status.innerText =
+            'Could not contact ESP32.';
+    }
+}
+
+// Update immediately
+updateData();
+
+// Update every 100 ms
+setInterval(
+    updateData,
+    100
+);
+
+</script>
+
+</body>
+
+</html>

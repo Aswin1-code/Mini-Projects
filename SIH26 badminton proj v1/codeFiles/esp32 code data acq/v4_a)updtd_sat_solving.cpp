@@ -3,6 +3,7 @@
 #include <WebServer.h>
 #include <MPU6050.h>
 #include <math.h>
+#include <string.h>
 
 // =====================================================
 // HARDWARE
@@ -30,7 +31,8 @@ WebServer server(80);
 // MPU6050 SETTINGS
 // =====================================================
 
-const float ACCEL_SCALE = 4096.0;   // ±8g
+//const float ACCEL_SCALE = 4096.0;   // ±8g
+const float ACCEL_SCALE = 2048.0;  // ±16g
 const float GYRO_SCALE  = 16.4;     // ±2000 deg/s
 
 const float GRAVITY = 9.81;
@@ -117,6 +119,151 @@ float totalAcceleration = 0;
 float angularVelocity = 0;
 
 float instantSpeed = 0;
+// Raw accelerometer readings (signed register counts)
+int16_t rawAx = 0;
+int16_t rawAy = 0;
+int16_t rawAz = 0;
+
+// Raw readings captured at peak impact
+int16_t impactRawAx = 0;
+int16_t impactRawAy = 0;
+int16_t impactRawAz = 0;
+
+int16_t impactRawAz = 0;
+
+// =====================================================
+// CLIPPING-AWARE SNAPSHOT RING BUFFER
+// =====================================================
+// Stores recent sensor samples so completeSwing() can select
+// the sample nearest the midpoint from peak impact to completion.
+const int SAMPLE_BUFFER_CAPACITY = 2048;
+const int16_t CLIP_RAW_THRESHOLD = 32760;
+
+struct SensorSample
+{
+    unsigned long timestamp;
+    float ax, ay, az;       // acceleration in g
+    float gx, gy, gz;       // bias-corrected deg/s
+    int16_t rawAx, rawAy, rawAz;
+    int16_t rawGx, rawGy, rawGz;
+    bool clipped;
+};
+
+SensorSample sampleBuffer[SAMPLE_BUFFER_CAPACITY];
+int sampleWriteIndex = 0;
+int sampleStoredCount = 0;
+
+struct SnapshotSelection
+{
+    bool found;
+    bool clipped;
+    unsigned long timestamp;
+    float ax, ay, az;
+    float gx, gy, gz;
+    const char* source;
+};
+
+bool rawValueClipped(int16_t value)
+{
+    return value >= CLIP_RAW_THRESHOLD ||
+           value <= -CLIP_RAW_THRESHOLD;
+}
+
+void storeSensorSample(
+    unsigned long timestamp,
+    int16_t rax, int16_t ray, int16_t raz,
+    int16_t rgx, int16_t rgy, int16_t rgz)
+{
+    SensorSample &s = sampleBuffer[sampleWriteIndex];
+    s.timestamp = timestamp;
+    s.ax = ax; s.ay = ay; s.az = az;
+    s.gx = gx; s.gy = gy; s.gz = gz;
+    s.rawAx = rax; s.rawAy = ray; s.rawAz = raz;
+    s.rawGx = rgx; s.rawGy = rgy; s.rawGz = rgz;
+    s.clipped =
+        rawValueClipped(rax) || rawValueClipped(ray) ||
+        rawValueClipped(raz) || rawValueClipped(rgx) ||
+        rawValueClipped(rgy) || rawValueClipped(rgz);
+
+    sampleWriteIndex = (sampleWriteIndex + 1) % SAMPLE_BUFFER_CAPACITY;
+    if (sampleStoredCount < SAMPLE_BUFFER_CAPACITY) sampleStoredCount++;
+}
+
+// Select closest non-clipped sample to midpoint within the interval
+// [peakImpactTime, completionTime]. If none is valid, retain the closest
+// available sample but explicitly mark it clipped/unusable.
+SnapshotSelection selectMidpointSnapshot(
+    unsigned long peakTime,
+    unsigned long completionTime)
+{
+    SnapshotSelection result;
+    result.found = false;
+    result.clipped = true;
+    result.timestamp = 0;
+    result.ax = result.ay = result.az = 0;
+    result.gx = result.gy = result.gz = 0;
+    result.source = "NONE";
+
+    const unsigned long interval = completionTime - peakTime;
+    const unsigned long midpointOffset = interval / 2;
+
+    unsigned long bestValidDistance = 0xFFFFFFFFUL;
+    unsigned long bestAnyDistance = 0xFFFFFFFFUL;
+    bool foundValid = false;
+    SensorSample bestValid;
+    SensorSample bestAny;
+
+    for (int n = 0; n < sampleStoredCount; n++)
+    {
+        int idx = sampleWriteIndex - 1 - n;
+        while (idx < 0) idx += SAMPLE_BUFFER_CAPACITY;
+        const SensorSample &s = sampleBuffer[idx];
+
+        // Unsigned subtraction remains safe across millis() rollover
+        // for this short, bounded swing interval.
+        unsigned long offset = s.timestamp - peakTime;
+        if (offset > interval) continue;
+
+        unsigned long distance =
+            (offset > midpointOffset)
+            ? (offset - midpointOffset)
+            : (midpointOffset - offset);
+
+        if (distance < bestAnyDistance)
+        {
+            bestAnyDistance = distance;
+            bestAny = s;
+        }
+
+        if (!s.clipped && distance < bestValidDistance)
+        {
+            bestValidDistance = distance;
+            bestValid = s;
+            foundValid = true;
+        }
+    }
+
+    if (foundValid)
+    {
+        result.found = true;
+        result.clipped = false;
+        result.timestamp = bestValid.timestamp;
+        result.ax = bestValid.ax; result.ay = bestValid.ay; result.az = bestValid.az;
+        result.gx = bestValid.gx; result.gy = bestValid.gy; result.gz = bestValid.gz;
+        result.source = (bestValidDistance == 0) ? "MIDPOINT" : "NEARBY_VALID";
+    }
+    else if (bestAnyDistance != 0xFFFFFFFFUL)
+    {
+        result.found = true;
+        result.clipped = true;
+        result.timestamp = bestAny.timestamp;
+        result.ax = bestAny.ax; result.ay = bestAny.ay; result.az = bestAny.az;
+        result.gx = bestAny.gx; result.gy = bestAny.gy; result.gz = bestAny.gz;
+        result.source = "NO_VALID_CLIPPED";
+    }
+
+    return result;
+}
 
 // =====================================================
 // SWING DATA
@@ -265,6 +412,18 @@ struct SwingRecord
 
     uint8_t mot_thr;
     uint8_t mot_dur;
+    
+    // Raw accelerometer values at peak impact
+    int16_t raw_ax;
+    int16_t raw_ay;
+    int16_t raw_az;
+
+    // Selected sample near midpoint between peak impact and swing completion
+    unsigned long snapshot_timestamp_ms;
+    float snapshot_ax, snapshot_ay, snapshot_az;
+    float snapshot_gx, snapshot_gy, snapshot_gz;
+    char snapshot_source[20];
+    int snapshot_clipped;
 };
 
 const int MAX_RECORDS = 500;
@@ -305,6 +464,8 @@ void serviceMpuInterrupt();
 void resetPeakSnapshots();
 void captureSpeedPeak();
 void captureImpactPeak();
+void storeSensorSample(unsigned long timestamp, int16_t rax, int16_t ray, int16_t raz, int16_t rgx, int16_t rgy, int16_t rgz);
+SnapshotSelection selectMidpointSnapshot(unsigned long peakTime, unsigned long completionTime);
 
 // =====================================================
 // SETUP
@@ -363,8 +524,8 @@ void setup()
     // =================================================
 
     // ±8g
-    mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
-
+    //mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
+mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
     // ±2000 deg/s
     mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
 
@@ -730,10 +891,6 @@ void calibrateGyro()
 
 void readSensor()
 {
-    int16_t rawAx;
-    int16_t rawAy;
-    int16_t rawAz;
-
     int16_t rawGx;
     int16_t rawGy;
     int16_t rawGz;
@@ -748,9 +905,13 @@ void readSensor()
     );
 
     // =================================================
+    // RAW ACCELEROMETER VALUES
+    // =================================================
+    // rawAx, rawAy, rawAz remain in original sensor counts.
+
+    // =================================================
     // ACCELERATION → g
     // =================================================
-
     ax = (float)rawAx / ACCEL_SCALE;
     ay = (float)rawAy / ACCEL_SCALE;
     az = (float)rawAz / ACCEL_SCALE;
@@ -758,7 +919,6 @@ void readSensor()
     // =================================================
     // GYRO → deg/s
     // =================================================
-
     gx =
         ((float)rawGx / GYRO_SCALE)
         - gyroBiasX;
@@ -774,7 +934,6 @@ void readSensor()
     // =================================================
     // VECTOR GRAVITY FILTER
     // =================================================
-
     gravityX =
         GRAVITY_ALPHA * gravityX
         + (1.0 - GRAVITY_ALPHA) * ax;
@@ -790,7 +949,6 @@ void readSensor()
     // =================================================
     // REMOVE GRAVITY
     // =================================================
-
     linearAccX =
         (ax - gravityX) * GRAVITY;
 
@@ -803,7 +961,6 @@ void readSensor()
     // =================================================
     // TOTAL LINEAR ACCELERATION
     // =================================================
-
     totalAcceleration =
         sqrt(
             linearAccX * linearAccX +
@@ -814,7 +971,6 @@ void readSensor()
     // =================================================
     // ANGULAR VELOCITY
     // =================================================
-
     angularVelocity =
         sqrt(
             gx * gx +
@@ -825,24 +981,15 @@ void readSensor()
     // =================================================
     // PROJECT SPEED SCORE
     // =================================================
-    //
-    // This is NOT physical racket velocity.
-    //
-    // It is a gyro-derived project score.
-    //
-    // speed = angular velocity × 0.03
-    //
-    // Example:
-    // 100 deg/s → 3.0
-    // 300 deg/s → 9.0
-    // 500 deg/s → 15.0
-    //
-    // =================================================
+    instantSpeed = angularVelocity * 0.03;
 
-    instantSpeed =
-        angularVelocity * 0.03;
+    // Save each reading for later midpoint/nearby-valid selection.
+    storeSensorSample(
+        millis(),
+        rawAx, rawAy, rawAz,
+        rawGx, rawGy, rawGz
+    );
 }
-
 // =====================================================
 // START CONDITION
 // =====================================================
@@ -891,6 +1038,10 @@ void resetPeakSnapshots()
     imgy = gy;
     imgz = gz;
 
+    impactRawAx = rawAx;
+    impactRawAy = rawAy;
+    impactRawAz = rawAz;
+
     peakSpeedTime = millis();
     peakImpactTime = millis();
 }
@@ -925,6 +1076,10 @@ void captureImpactPeak()
     imgx = gx;
     imgy = gy;
     imgz = gz;
+
+    impactRawAx = rawAx;
+    impactRawAy = rawAy;
+    impactRawAz = rawAz;
 
     peakImpactTime = millis();
 }
@@ -1135,6 +1290,10 @@ void completeSwing(
 
     unsigned long completionTime = millis();
 
+    // Reference is the peak-impact timestamp (not peak-speed timestamp).
+    SnapshotSelection snapshot =
+        selectMidpointSnapshot(peakImpactTime, completionTime);
+
     // =================================================
     // STORE RECORD
     // =================================================
@@ -1195,6 +1354,25 @@ void completeSwing(
 
         records[recordCount].mot_dur =
             motDur;
+        // Raw accelerometer readings at peak impact
+        records[recordCount].raw_ax = impactRawAx;
+        records[recordCount].raw_ay = impactRawAy;
+        records[recordCount].raw_az = impactRawAz;
+
+        records[recordCount].snapshot_timestamp_ms =
+            snapshot.found ? toSessionMillis(snapshot.timestamp) : 0;
+        records[recordCount].snapshot_ax = snapshot.ax;
+        records[recordCount].snapshot_ay = snapshot.ay;
+        records[recordCount].snapshot_az = snapshot.az;
+        records[recordCount].snapshot_gx = snapshot.gx;
+        records[recordCount].snapshot_gy = snapshot.gy;
+        records[recordCount].snapshot_gz = snapshot.gz;
+        strncpy(records[recordCount].snapshot_source, snapshot.source,
+                sizeof(records[recordCount].snapshot_source) - 1);
+        records[recordCount].snapshot_source[
+            sizeof(records[recordCount].snapshot_source) - 1] = '\\0';
+        records[recordCount].snapshot_clipped =
+            snapshot.found ? (snapshot.clipped ? 1 : 0) : -1;
 
         recordCount++;
     }
@@ -1230,6 +1408,16 @@ void completeSwing(
 
     Serial.print("Impact: ");
     Serial.println(impact);
+
+    Serial.print("Snapshot source: ");
+    Serial.println(snapshot.source);
+    Serial.print("Snapshot clipped flag: ");
+    Serial.println(snapshot.found ? (snapshot.clipped ? 1 : 0) : -1);
+    if (snapshot.found)
+    {
+        Serial.print("Snapshot session timestamp (ms): ");
+        Serial.println(toSessionMillis(snapshot.timestamp));
+    }
 
     Serial.print("Duration: ");
     Serial.print(duration / 1000.0);
@@ -1359,6 +1547,20 @@ label {
 <div class="card">
 
 <h2>Live Sensor</h2>
+<p>
+    Raw Accelerometer X:
+    <span id="rawAx" class="value">0</span>
+</p>
+
+<p>
+    Raw Accelerometer Y:
+    <span id="rawAy" class="value">0</span>
+</p>
+
+<p>
+    Raw Accelerometer Z:
+    <span id="rawAz" class="value">0</span>
+</p>
 
 <p>
 Acceleration:
@@ -1526,10 +1728,15 @@ async function updateData()
                     cache: 'no-store'
                 }
             );
+        
 
         const d =
             await response.json();
 
+        document.getElementById('rawAx').innerText = d.rawAx;
+        document.getElementById('rawAy').innerText = d.rawAy;
+        document.getElementById('rawAz').innerText = d.rawAz;
+        
         document.getElementById(
             'acceleration'
         ).innerText =
@@ -1748,6 +1955,15 @@ void handleData()
 
     json += ",\"mpuIntStatus\":";
     json += String(lastMpuIntStatus);
+    
+    json += ",\"rawAx\":";
+    json += String(rawAx);
+
+    json += ",\"rawAy\":";
+    json += String(rawAy);
+
+    json += ",\"rawAz\":";
+    json += String(rawAz);
 
     json += "}";
 
@@ -1919,7 +2135,15 @@ void handleDownload()
         "hit_label,"
         "int_flag,"
         "mot_thr,"
-        "mot_dur\n";
+        "mot_dur,"
+        "raw_ax,"
+        "raw_ay,"
+        "raw_az,"
+        "snapshot_timestamp_ms,"
+        "snapshot_ax,snapshot_ay,snapshot_az,"
+        "snapshot_gx,snapshot_gy,snapshot_gz,"
+        "snapshot_source,"
+        "snapshot_clipped\n";
 
     for (int i = 0; i < recordCount; i++)
     {
@@ -2072,6 +2296,38 @@ void handleDownload()
         csv += String(
             records[i].mot_dur
         );
+        
+        csv += ",";
+        csv += String(records[i].raw_ax);
+
+        csv += ",";
+        csv += String(records[i].raw_ay);
+
+        csv += ",";
+        csv += String(records[i].raw_az);
+
+        csv += ",";
+        csv += String(records[i].snapshot_timestamp_ms);
+
+        csv += ",";
+        csv += String(records[i].snapshot_ax, 4);
+        csv += ",";
+        csv += String(records[i].snapshot_ay, 4);
+        csv += ",";
+        csv += String(records[i].snapshot_az, 4);
+
+        csv += ",";
+        csv += String(records[i].snapshot_gx, 4);
+        csv += ",";
+        csv += String(records[i].snapshot_gy, 4);
+        csv += ",";
+        csv += String(records[i].snapshot_gz, 4);
+
+        csv += ",";
+        csv += String(records[i].snapshot_source);
+
+        csv += ",";
+        csv += String(records[i].snapshot_clipped);
 
         csv += "\n";
     }
