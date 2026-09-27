@@ -20,7 +20,7 @@ from sklearn.metrics import (
 # 1. LOAD DATASET
 # =========================================
 
-file_path = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\dataset\w_m_s_final_dataset.csv"
+file_path = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\matlab generate pro data\w_m_s_final_dataset.csv"
 
 df = pd.read_csv(file_path)
 
@@ -226,7 +226,7 @@ model_package = {
     "features": features
 }
 
-save_path = r"E:\Mini Project\gitfolder all proj\Mini-Projects\Sem6\v2\swing_model.pkl"
+save_path = r"E:\Mini Project\gitfolder all proj\Mini-Projects\SIH26 badminton proj v1\codeFiles\performanceClassify ml train\swing_model.pkl"
 
 joblib.dump(
     model_package,

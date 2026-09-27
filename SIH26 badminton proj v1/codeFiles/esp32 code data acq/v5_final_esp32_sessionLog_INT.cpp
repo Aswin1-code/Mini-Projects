@@ -14,8 +14,9 @@ MPU6050 mpu;
 #define SCL_PIN 25
 #define LED_PIN 2
 
-// MPU6050 INT is connected to ESP32 GPIO 4.
+// MPU6050 INT connected to ESP32 GPIO 4
 #define INT_PIN 4
+
 
 // =====================================================
 // WIFI ACCESS POINT
@@ -26,22 +27,27 @@ const char* AP_PASSWORD = "hello123";
 
 WebServer server(80);
 
+
 // =====================================================
 // MPU6050 SETTINGS
 // =====================================================
 
-//const float ACCEL_SCALE = 4096.0;   // ±8g
-const float ACCEL_SCALE = 2048.0;  // ±16g
+const float ACCEL_SCALE = 4096.0;   // ±8g (baseline)
 const float GYRO_SCALE  = 16.4;     // ±2000 deg/s
 
 const float GRAVITY = 9.81;
 
-// I2C and sample-rate configuration.
-// With DLPF enabled, the MPU6050 sample-rate base is 1 kHz.
-// SMPLRT_DIV = 0 requests 1 kHz sensor output rate.
+
+// =====================================================
+// MPU6050 I2C AND SAMPLE RATE SETTINGS
+// Extracted from INT code
+// =====================================================
+
 const uint32_t I2C_CLOCK_HZ = 400000;
+
 const uint8_t MPU_SAMPLE_RATE_DIVIDER = 0;
 const uint8_t MPU_DLPF_CONFIG = 1;
+
 
 // =====================================================
 // MPU6050 REGISTER DEFINITIONS
@@ -49,19 +55,37 @@ const uint8_t MPU_DLPF_CONFIG = 1;
 
 const uint8_t MPU6050_ADDRESS = 0x68;
 
-const uint8_t REG_SMPLRT_DIV  = 0x19;
-const uint8_t REG_CONFIG      = 0x1A;
-const uint8_t REG_INT_PIN_CFG = 0x37;
-const uint8_t REG_INT_ENABLE  = 0x38;
-const uint8_t REG_INT_STATUS  = 0x3A;
-const uint8_t REG_MOT_THR     = 0x1F;
-const uint8_t REG_MOT_DUR     = 0x20;
-const uint8_t REG_PWR_MGMT_1  = 0x6B;
+const uint8_t REG_SMPLRT_DIV = 0x19;
+const uint8_t REG_CONFIG = 0x1A;
+const uint8_t REG_INT_ENABLE = 0x38;
+const uint8_t REG_INT_STATUS = 0x3A;
+const uint8_t REG_MOT_THR = 0x1F;
+const uint8_t REG_MOT_DUR = 0x20;
 
 const uint8_t MPU_MOTION_INT_BIT = 0x40;
 
+
+// =====================================================
+// MPU6050 MOTION INTERRUPT SETTINGS
+// =====================================================
+
+uint8_t motThr = 30;
+uint8_t motDur = 1;
+
+// ISR only sets this flag.
+// I2C operations are performed in loop().
+volatile bool mpuIntPending = false;
+
+// At most one accepted INT per active swing.
+bool swingIntFlag = false;
+
+// Most recent MPU interrupt status.
+uint8_t lastMpuIntStatus = 0;
+
+
 // =====================================================
 // SWING DETECTION PARAMETERS
+// BASELINE — UNCHANGED
 // =====================================================
 
 const float START_THRESHOLD = 17.0;
@@ -77,8 +101,10 @@ const unsigned long END_CONFIRM_TIME = 100;
 // Short protection against immediate return movement
 const unsigned long COOLDOWN = 200;
 
+
 // =====================================================
 // GRAVITY FILTER
+// BASELINE — UNCHANGED
 // =====================================================
 
 const float GRAVITY_ALPHA = 0.95;
@@ -87,8 +113,10 @@ float gravityX = 0;
 float gravityY = 0;
 float gravityZ = 0;
 
+
 // =====================================================
 // GYRO CALIBRATION
+// BASELINE — UNCHANGED
 // =====================================================
 
 float gyroBiasX = 0;
@@ -97,8 +125,10 @@ float gyroBiasZ = 0;
 
 const int CALIBRATION_SAMPLES = 800;
 
+
 // =====================================================
 // LIVE SENSOR VALUES
+// BASELINE — UNCHANGED
 // =====================================================
 
 float ax = 0;
@@ -119,76 +149,14 @@ float angularVelocity = 0;
 
 float instantSpeed = 0;
 
-// =====================================================
-// COMPACT RAW SENSOR SAMPLE BUFFER
-// =====================================================
 
-// 1024 samples × approximately 16 bytes = 16 KB.
-// Stores raw MPU values only; no per-sample floats.
-const uint16_t SAMPLE_BUFFER_SIZE = 1024;
-
-struct SensorSample
-{
-    uint32_t timestamp;
-    int16_t ax;
-    int16_t ay;
-    int16_t az;
-    int16_t gx;
-    int16_t gy;
-    int16_t gz;
-    int16_t gravityX;
-    int16_t gravityY;
-    int16_t gravityZ;
-};
-
-SensorSample sampleBuffer[SAMPLE_BUFFER_SIZE];
-
-uint16_t sampleWriteIndex = 0;
-uint16_t sampleCount = 0;
-void storeRawSample(
-    uint32_t timestamp,
-    int16_t rawAx,
-    int16_t rawAy,
-    int16_t rawAz,
-    int16_t rawGx,
-    int16_t rawGy,
-    int16_t rawGz
-)
-{
-    SensorSample &s = sampleBuffer[sampleWriteIndex];
-
-    s.timestamp = timestamp;
-
-    // Raw accelerometer values
-    s.ax = rawAx;
-    s.ay = rawAy;
-    s.az = rawAz;
-
-    // Raw gyroscope values
-    s.gx = rawGx;
-    s.gy = rawGy;
-    s.gz = rawGz;
-
-    // NEW: Store gravity estimate in raw accelerometer counts
-    s.gravityX = (int16_t)(gravityX * ACCEL_SCALE);
-    s.gravityY = (int16_t)(gravityY * ACCEL_SCALE);
-    s.gravityZ = (int16_t)(gravityZ * ACCEL_SCALE);
-
-    // Advance circular buffer
-    sampleWriteIndex =
-        (sampleWriteIndex + 1) % SAMPLE_BUFFER_SIZE;
-
-    if (sampleCount < SAMPLE_BUFFER_SIZE)
-        sampleCount++;
-}
 // =====================================================
 // SWING DATA
+// BASELINE — UNCHANGED
 // =====================================================
 
 float peakSpeed = 0;
 float peakAcceleration = 0;
-float snapshotSpeed = 0;
-float snapshotImpact = 0;
 
 unsigned long swingStartTime = 0;
 unsigned long endConditionStartTime = 0;
@@ -197,15 +165,17 @@ unsigned long cooldownStartTime = 0;
 unsigned long lastSwingDuration = 0;
 
 unsigned long swingCount = 0;
+
+
 // =====================================================
-// SESSION-RELATIVE MILLIS TIMING
+// SESSION-RELATIVE TIMING
+// Extracted from INT code
 // =====================================================
 
 // Session begins at the first detected swing.
 bool sessionStarted = false;
 unsigned long sessionStartMillis = 0;
 
-// Convert raw ESP32 millis() to session-relative time.
 unsigned long getSessionMillis()
 {
     if (!sessionStarted)
@@ -216,7 +186,6 @@ unsigned long getSessionMillis()
     return millis() - sessionStartMillis;
 }
 
-// Convert a previously captured raw millis() timestamp.
 unsigned long toSessionMillis(unsigned long rawTime)
 {
     if (!sessionStarted)
@@ -227,27 +196,10 @@ unsigned long toSessionMillis(unsigned long rawTime)
     return rawTime - sessionStartMillis;
 }
 
-// Peak-event snapshots.
-// Speed and acceleration peaks may happen at different samples.
-float spax = 0;
-float spay = 0;
-float spaz = 0;
-float spgx = 0;
-float spgy = 0;
-float spgz = 0;
-
-float imax = 0;
-float imay = 0;
-float imaz = 0;
-float imgx = 0;
-float imgy = 0;
-float imgz = 0;
-
-unsigned long peakSpeedTime = 0;
-unsigned long peakImpactTime = 0;
 
 // =====================================================
 // STATE MACHINE
+// BASELINE — UNCHANGED
 // =====================================================
 
 enum SwingState
@@ -259,99 +211,37 @@ enum SwingState
 
 SwingState swingState = IDLE;
 
-// =====================================================
-// MPU6050 MOTION INTERRUPT CALIBRATION
-// =====================================================
-
-// Initial configurable values.
-// These are starting values for testing, not universally
-// calibrated values for every racket/mounting condition.
-uint8_t motThr = 30;                        //    
-uint8_t motDur = 1;                         //
-//==============================================
-// The dashboard sets this once for a batch:
-// 0 = free swing
-// 1 = real shuttle hit
-int hitLabel = 0;
-
-// ISR only sets this flag. I2C operations happen in loop().
-volatile bool mpuIntPending = false;
-
-// At most one accepted motion interrupt per active swing.
-bool swingIntFlag = false;
-
-// Track the most recent MPU interrupt status for dashboard.
-uint8_t lastMpuIntStatus = 0;
 
 // =====================================================
 // CSV STORAGE
 // =====================================================
 
-// Stores completed swing records in RAM.
+// Exact requested CSV fields:
 //
-// CSV columns:
-// swing_count,timestamp_ms,start_time_ms,end_time_ms,
-// duration_ms,
-// spax,spay,spaz,spgx,spgy,spgz,peak_speed,
-// imax,imay,imaz,imgx,imgy,imgz,peak_impact,
-// hit_label,int_flag,mot_thr,mot_dur
+// swing_count,timestamp,start_time,end_time,duration,
+// ax,ay,az,gx,gy,gz,speed,impact,int_flag
 
 struct SwingRecord
 {
     unsigned long swing_count;
 
-    unsigned long timestamp_ms;
-    unsigned long start_time_ms;
-    unsigned long end_time_ms;
-    unsigned long duration_ms;
+    unsigned long timestamp;
+    unsigned long start_time;
+    unsigned long end_time;
+    unsigned long duration;
 
-    float spax;
-    float spay;
-    float spaz;
+    float ax;
+    float ay;
+    float az;
 
-    float spgx;
-    float spgy;
-    float spgz;
+    float gx;
+    float gy;
+    float gz;
 
-    float peak_speed;
+    float speed;
+    float impact;
 
-    float imax;
-    float imay;
-    float imaz;
-
-    float imgx;
-    float imgy;
-    float imgz;
-
-    float peak_impact;
-
-    int hit_label;
     int int_flag;
-
-    uint8_t mot_thr;
-    uint8_t mot_dur;
-
-    // Midpoint snapshot fields
-    unsigned long snapshot_timestamp_ms;
-
-    float snapshot_ax;
-    float snapshot_ay;
-    float snapshot_az;
-
-    float snapshot_gx;
-    float snapshot_gy;
-    float snapshot_gz;
-
-    // 0 = MIDPOINT
-    // 1 = NEARBY_VALID
-    // 2 = CLIPPED_ONLY
-    // 3 = NONE
-    uint8_t snapshot_source;
-
-    // 1 = snapshot clipped, 0 = not clipped
-    uint8_t snapshot_clipped;
-    float snapshot_speed;
-    float snapshot_impact;
 };
 
 const int MAX_RECORDS = 500;
@@ -361,155 +251,6 @@ SwingRecord records[MAX_RECORDS];
 int recordCount = 0;
 
 
-bool isRawSampleClipped(const SensorSample &s)
-{
-    // MPU6050 output saturates at signed 16-bit limits.
-    const int16_t CLIP_LIMIT = 32760;
-
-    return
-        abs((int)s.ax) >= CLIP_LIMIT ||
-        abs((int)s.ay) >= CLIP_LIMIT ||
-        abs((int)s.az) >= CLIP_LIMIT ||
-        abs((int)s.gx) >= CLIP_LIMIT ||
-        abs((int)s.gy) >= CLIP_LIMIT ||
-        abs((int)s.gz) >= CLIP_LIMIT;
-}
-struct SnapshotResult
-{
-    bool found;
-    bool clipped;
-
-    uint32_t timestamp;
-
-    int16_t ax;
-    int16_t ay;
-    int16_t az;
-
-    int16_t gx;
-    int16_t gy;
-    int16_t gz;
-    int16_t gravityX;
-    int16_t gravityY;
-    int16_t gravityZ;
-
-    uint8_t source;
-};
-
-SnapshotResult findMidpointSnapshot(
-    uint32_t peakTime,
-    uint32_t completionTime
-)
-{
-    SnapshotResult result = {};
-
-    result.found = false;
-    result.clipped = false;
-    result.source = 3; // NONE
-
-    // Unsigned subtraction handles millis() rollover,
-    // provided the interval is shorter than 2^32 ms.
-    uint32_t interval =
-        completionTime - peakTime;
-
-    // Midpoint relative to peak impact.
-    uint32_t midpointOffset = interval / 2;
-
-    uint32_t bestValidDistance = UINT32_MAX;
-    uint32_t bestClippedDistance = UINT32_MAX;
-
-    int bestValidIndex = -1;
-    int bestClippedIndex = -1;
-
-    for (uint16_t i = 0; i < sampleCount; i++)
-    {
-        // Oldest valid sample in the ring.
-        uint16_t index =
-            (sampleWriteIndex + SAMPLE_BUFFER_SIZE
-             - sampleCount + i) % SAMPLE_BUFFER_SIZE;
-
-        const SensorSample &s = sampleBuffer[index];
-
-        uint32_t offset =
-            s.timestamp - peakTime;
-
-        // Only samples inside peak-impact → completion.
-        if (offset > interval)
-            continue;
-
-        uint32_t distance =
-            (offset > midpointOffset)
-            ? offset - midpointOffset
-            : midpointOffset - offset;
-
-        bool clipped = isRawSampleClipped(s);
-
-        if (!clipped)
-        {
-            if (distance < bestValidDistance)
-            {
-                bestValidDistance = distance;
-                bestValidIndex = index;
-            }
-        }
-        else
-        {
-            if (distance < bestClippedDistance)
-            {
-                bestClippedDistance = distance;
-                bestClippedIndex = index;
-            }
-        }
-    }
-
-    int chosenIndex = -1;
-
-    if (bestValidIndex >= 0)
-    {
-        chosenIndex = bestValidIndex;
-
-        const SensorSample &chosen =
-            sampleBuffer[chosenIndex];
-
-        uint32_t chosenOffset =
-            chosen.timestamp - peakTime;
-
-        result.source =
-            (chosenOffset == midpointOffset)
-            ? 0  // MIDPOINT
-            : 1; // NEARBY_VALID
-
-        result.clipped = false;
-    }
-    else if (bestClippedIndex >= 0)
-    {
-        chosenIndex = bestClippedIndex;
-
-        result.source = 2; // CLIPPED_ONLY
-        result.clipped = true;
-    }
-
-    if (chosenIndex >= 0)
-    {
-        const SensorSample &s =
-            sampleBuffer[chosenIndex];
-
-        result.found = true;
-        result.timestamp = s.timestamp;
-
-        result.ax = s.ax;
-        result.ay = s.ay;
-        result.az = s.az;
-
-        result.gx = s.gx;
-        result.gy = s.gy;
-        result.gz = s.gz;
-        result.gravityX = s.gravityX;
-        result.gravityY = s.gravityY;
-        result.gravityZ = s.gravityZ;
-    }
-
-    return result;
-}
 // =====================================================
 // FUNCTION DECLARATIONS
 // =====================================================
@@ -521,7 +262,11 @@ bool startCondition();
 bool endCondition();
 
 void processSwing();
-void completeSwing(float speed, float impact, unsigned long duration);
+void completeSwing(
+    float speed,
+    float impact,
+    unsigned long duration
+);
 
 String stateToString();
 
@@ -530,18 +275,19 @@ void handleData();
 void handleDownload();
 void handleSettings();
 
-void onMpuInterrupt();
+// MPU6050 INT functions
+void IRAM_ATTR onMpuInterrupt();
 
 bool writeMpuRegister(uint8_t reg, uint8_t value);
 uint8_t readMpuRegister(uint8_t reg);
+
 void configureMpuSampleRate();
 void configureMpuMotionInterrupt();
+
 void clearMpuInterruptStatus();
 void discardPendingInterrupt();
 void serviceMpuInterrupt();
-void resetPeakSnapshots();
-void captureSpeedPeak();
-void captureImpactPeak();
+
 
 // =====================================================
 // SETUP
@@ -560,14 +306,16 @@ void setup()
 
     pinMode(INT_PIN, INPUT);
 
+
     // =================================================
     // I2C
     // =================================================
 
     Wire.begin(SDA_PIN, SCL_PIN);
 
-    // Set I2C clock to 400 kHz.
+    // Extracted from INT code
     Wire.setClock(I2C_CLOCK_HZ);
+
 
     // =================================================
     // MPU6050
@@ -595,24 +343,30 @@ void setup()
 
     Serial.println("MPU6050 connected.");
 
+
     // =================================================
     // SENSOR RANGE
+    // BASELINE — UNCHANGED
     // =================================================
 
     // ±8g
-    //mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
-mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
+    mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
+
     // ±2000 deg/s
     mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
 
+
     // =================================================
     // SAMPLE RATE CONFIGURATION
+    // Extracted from INT code
     // =================================================
 
     configureMpuSampleRate();
 
+
     // =================================================
     // GYRO CALIBRATION
+    // BASELINE — UNCHANGED
     // =================================================
 
     Serial.println();
@@ -632,8 +386,10 @@ mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
     Serial.print("Gyro bias Z = ");
     Serial.println(gyroBiasZ);
 
+
     // =================================================
     // INITIAL GRAVITY ESTIMATE
+    // BASELINE — UNCHANGED
     // =================================================
 
     int16_t rawAx, rawAy, rawAz;
@@ -652,8 +408,9 @@ mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
     gravityY = (float)rawAy / ACCEL_SCALE;
     gravityZ = (float)rawAz / ACCEL_SCALE;
 
+
     // =================================================
-    // MPU MOTION INTERRUPT
+    // MPU MOTION INTERRUPT CONFIGURATION
     // =================================================
 
     configureMpuMotionInterrupt();
@@ -673,8 +430,10 @@ mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
     Serial.print("Initial MOT_DUR = ");
     Serial.println(motDur);
 
+
     // =================================================
     // WIFI ACCESS POINT
+    // BASELINE — UNCHANGED
     // =================================================
 
     WiFi.mode(WIFI_AP);
@@ -690,6 +449,7 @@ mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
     Serial.print("IP address: ");
     Serial.println(WiFi.softAPIP());
 
+
     // =================================================
     // WEB SERVER ROUTES
     // =================================================
@@ -700,6 +460,7 @@ mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
 
     server.on("/download", handleDownload);
 
+    // Added for INT threshold/duration settings
     server.on("/settings", handleSettings);
 
     server.begin();
@@ -718,8 +479,10 @@ mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_16);
     digitalWrite(LED_PIN, LOW);
 }
 
+
 // =====================================================
 // MPU6050 REGISTER WRITE
+// Extracted from INT code
 // =====================================================
 
 bool writeMpuRegister(uint8_t reg, uint8_t value)
@@ -734,8 +497,10 @@ bool writeMpuRegister(uint8_t reg, uint8_t value)
     return (result == 0);
 }
 
+
 // =====================================================
 // MPU6050 REGISTER READ
+// Extracted from INT code
 // =====================================================
 
 uint8_t readMpuRegister(uint8_t reg)
@@ -765,8 +530,10 @@ uint8_t readMpuRegister(uint8_t reg)
     return 0;
 }
 
+
 // =====================================================
 // MPU6050 SAMPLE RATE CONFIGURATION
+// Extracted from INT code
 // =====================================================
 
 void configureMpuSampleRate()
@@ -800,8 +567,10 @@ void configureMpuSampleRate()
     Serial.println("Requested MPU output rate: 1000 Hz");
 }
 
+
 // =====================================================
 // MPU6050 MOTION INTERRUPT CONFIGURATION
+// Extracted from INT code
 // =====================================================
 
 void configureMpuMotionInterrupt()
@@ -832,6 +601,7 @@ void configureMpuMotionInterrupt()
     interrupts();
 }
 
+
 // =====================================================
 // CLEAR MPU INTERRUPT STATUS
 // =====================================================
@@ -841,6 +611,7 @@ void clearMpuInterruptStatus()
     // Reading INT_STATUS clears the latched status bits.
     lastMpuIntStatus = readMpuRegister(REG_INT_STATUS);
 }
+
 
 // =====================================================
 // DISCARD PENDING INTERRUPTS
@@ -855,6 +626,7 @@ void discardPendingInterrupt()
     clearMpuInterruptStatus();
 }
 
+
 // =====================================================
 // MPU INTERRUPT SERVICE ROUTINE
 // =====================================================
@@ -864,6 +636,7 @@ void IRAM_ATTR onMpuInterrupt()
     // Do not perform I2C operations inside this ISR.
     mpuIntPending = true;
 }
+
 
 // =====================================================
 // SERVICE MPU INTERRUPT IN MAIN LOOP
@@ -888,10 +661,10 @@ void serviceMpuInterrupt()
         return;
     }
 
-    // Read the actual MPU6050 status in normal loop context.
+    // Read actual MPU6050 status in normal loop context.
     lastMpuIntStatus = readMpuRegister(REG_INT_STATUS);
 
-    // Accept at most one MPU motion interrupt per ACTIVE swing.
+    // Accept at most one motion INT per ACTIVE swing.
     if (
         swingState == ACTIVE &&
         !swingIntFlag &&
@@ -904,8 +677,10 @@ void serviceMpuInterrupt()
     }
 }
 
+
 // =====================================================
 // GYRO CALIBRATION
+// BASELINE — UNCHANGED
 // =====================================================
 
 void calibrateGyro()
@@ -961,8 +736,10 @@ void calibrateGyro()
     digitalWrite(LED_PIN, LOW);
 }
 
+
 // =====================================================
 // READ SENSOR
+// BASELINE — UNCHANGED
 // =====================================================
 
 void readSensor()
@@ -983,16 +760,7 @@ void readSensor()
         &rawGy,
         &rawGz
     );
-        // Store compact raw sample with timestamp.
-    storeRawSample(
-        millis(),
-        rawAx,
-        rawAy,
-        rawAz,
-        rawGx,
-        rawGy,
-        rawGz
-    );
+
 
     // =================================================
     // ACCELERATION → g
@@ -1001,6 +769,7 @@ void readSensor()
     ax = (float)rawAx / ACCEL_SCALE;
     ay = (float)rawAy / ACCEL_SCALE;
     az = (float)rawAz / ACCEL_SCALE;
+
 
     // =================================================
     // GYRO → deg/s
@@ -1018,6 +787,7 @@ void readSensor()
         ((float)rawGz / GYRO_SCALE)
         - gyroBiasZ;
 
+
     // =================================================
     // VECTOR GRAVITY FILTER
     // =================================================
@@ -1034,6 +804,7 @@ void readSensor()
         GRAVITY_ALPHA * gravityZ
         + (1.0 - GRAVITY_ALPHA) * az;
 
+
     // =================================================
     // REMOVE GRAVITY
     // =================================================
@@ -1047,6 +818,7 @@ void readSensor()
     linearAccZ =
         (az - gravityZ) * GRAVITY;
 
+
     // =================================================
     // TOTAL LINEAR ACCELERATION
     // =================================================
@@ -1057,6 +829,7 @@ void readSensor()
             linearAccY * linearAccY +
             linearAccZ * linearAccZ
         );
+
 
     // =================================================
     // ANGULAR VELOCITY
@@ -1069,29 +842,20 @@ void readSensor()
             gz * gz
         );
 
+
     // =================================================
     // PROJECT SPEED SCORE
-    // =================================================
-    //
-    // This is NOT physical racket velocity.
-    //
-    // It is a gyro-derived project score.
-    //
-    // speed = angular velocity × 0.03
-    //
-    // Example:
-    // 100 deg/s → 3.0
-    // 300 deg/s → 9.0
-    // 500 deg/s → 15.0
-    //
+    // BASELINE — UNCHANGED
     // =================================================
 
     instantSpeed =
         angularVelocity * 0.03;
 }
 
+
 // =====================================================
 // START CONDITION
+// BASELINE — UNCHANGED
 // =====================================================
 
 bool startCondition()
@@ -1102,8 +866,10 @@ bool startCondition()
     );
 }
 
+
 // =====================================================
 // END CONDITION
+// BASELINE — UNCHANGED
 // =====================================================
 
 bool endCondition()
@@ -1113,76 +879,17 @@ bool endCondition()
     );
 }
 
-// =====================================================
-// RESET PEAK SNAPSHOTS
-// =====================================================
-
-void resetPeakSnapshots()
-{
-    peakSpeed = instantSpeed;
-    peakAcceleration = totalAcceleration;
-
-    spax = ax;
-    spay = ay;
-    spaz = az;
-
-    spgx = gx;
-    spgy = gy;
-    spgz = gz;
-
-    imax = ax;
-    imay = ay;
-    imaz = az;
-
-    imgx = gx;
-    imgy = gy;
-    imgz = gz;
-
-    peakSpeedTime = millis();
-    peakImpactTime = millis();
-}
-
-// =====================================================
-// CAPTURE PEAK SPEED AXES
-// =====================================================
-
-void captureSpeedPeak()
-{
-    spax = ax;
-    spay = ay;
-    spaz = az;
-
-    spgx = gx;
-    spgy = gy;
-    spgz = gz;
-
-    peakSpeedTime = millis();
-}
-
-// =====================================================
-// CAPTURE PEAK IMPACT AXES
-// =====================================================
-
-void captureImpactPeak()
-{
-    imax = ax;
-    imay = ay;
-    imaz = az;
-
-    imgx = gx;
-    imgy = gy;
-    imgz = gz;
-
-    peakImpactTime = millis();
-}
 
 // =====================================================
 // PROCESS SWING
+// BASELINE FSM PRESERVED
+// INT FLAG ADDED
 // =====================================================
 
 void processSwing()
 {
     unsigned long now = millis();
+
 
     // =================================================
     // IDLE
@@ -1196,7 +903,7 @@ void processSwing()
 
         if (startCondition())
         {
-            // Start session timer at the first detected swing.
+            // Start session timer at first detected swing.
             if (!sessionStarted)
             {
                 sessionStartMillis = now;
@@ -1205,23 +912,26 @@ void processSwing()
 
             swingState = ACTIVE;
 
-            // Keep raw millis() internally for FSM calculations.
             swingStartTime = now;
 
             endConditionStartTime = 0;
 
+            peakSpeed = instantSpeed;
+
+            peakAcceleration = totalAcceleration;
+
+            // Reset INT flag for this swing.
             swingIntFlag = false;
 
             // Clear any old event immediately before
             // beginning a new active swing.
             discardPendingInterrupt();
 
-            resetPeakSnapshots();
-
             Serial.println();
             Serial.println(">>> SWING STARTED");
         }
     }
+
 
     // =================================================
     // ACTIVE
@@ -1230,32 +940,31 @@ void processSwing()
     else if (swingState == ACTIVE)
     {
         // ---------------------------------------------
-        // Track peak speed and its six sensor values
+        // Track peak speed
+        // BASELINE — UNCHANGED
         // ---------------------------------------------
 
         if (instantSpeed > peakSpeed)
         {
             peakSpeed = instantSpeed;
-
-            captureSpeedPeak();
         }
 
+
         // ---------------------------------------------
-        // Track peak acceleration and its six values
+        // Track peak acceleration
+        // BASELINE — UNCHANGED
         // ---------------------------------------------
 
         if (totalAcceleration > peakAcceleration)
         {
             peakAcceleration = totalAcceleration;
-
-            captureImpactPeak();
         }
+
 
         // ---------------------------------------------
         // Check end condition
+        // BASELINE — UNCHANGED
         // ---------------------------------------------
-
-        bool swingCompleted = false;
 
         if (endCondition())
         {
@@ -1288,8 +997,6 @@ void processSwing()
 
                 endConditionStartTime = 0;
 
-                swingCompleted = true;
-
                 Serial.println(">>> SWING ENDED");
                 Serial.print("Peak speed: ");
                 Serial.println(peakSpeed);
@@ -1307,14 +1014,15 @@ void processSwing()
             endConditionStartTime = 0;
         }
 
+
         // ---------------------------------------------
         // Maximum safety duration
+        // BASELINE — UNCHANGED
         // ---------------------------------------------
 
         if (
-            !swingCompleted &&
-            swingState == ACTIVE &&
-            now - swingStartTime >= MAX_SWING_DURATION
+            now - swingStartTime
+            >= MAX_SWING_DURATION
         )
         {
             unsigned long duration =
@@ -1336,9 +1044,10 @@ void processSwing()
         }
     }
 
+
     // =================================================
     // COOLDOWN
-    // =================================================
+    // =====================================================
 
     else if (swingState == COOLDOWN_STATE)
     {
@@ -1346,7 +1055,7 @@ void processSwing()
         discardPendingInterrupt();
 
         /*
-         * IMPORTANT:
+         * BASELINE behavior:
          *
          * We do NOT wait for the racket to become
          * perfectly stationary here.
@@ -1366,8 +1075,10 @@ void processSwing()
     }
 }
 
+
 // =====================================================
 // COMPLETE SWING
+// BASELINE RECORDING PRESERVED
 // =====================================================
 
 void completeSwing(
@@ -1381,57 +1092,7 @@ void completeSwing(
     lastSwingDuration = duration;
 
     unsigned long completionTime = millis();
-        SnapshotResult snapshot =
-        findMidpointSnapshot(
-            peakImpactTime,
-            completionTime
-        );
-        // Default values if no snapshot was found
-        snapshotSpeed = 0;
-        snapshotImpact = 0;
 
-        if (snapshot.found)
-        {
-            // Snapshot gyro: raw -> deg/s, then remove bias
-            float snapshotGx =
-                ((float)snapshot.gx / GYRO_SCALE) - gyroBiasX;
-
-            float snapshotGy =
-                ((float)snapshot.gy / GYRO_SCALE) - gyroBiasY;
-
-            float snapshotGz =
-                ((float)snapshot.gz / GYRO_SCALE) - gyroBiasZ;
-
-            // Same project speed-score formula
-            snapshotSpeed =
-                sqrt(
-                    snapshotGx * snapshotGx +
-                    snapshotGy * snapshotGy +
-                    snapshotGz * snapshotGz
-                ) * 0.03;
-
-            // Snapshot acceleration: raw -> g
-            float sax = (float)snapshot.ax / ACCEL_SCALE;
-            float say = (float)snapshot.ay / ACCEL_SCALE;
-            float saz = (float)snapshot.az / ACCEL_SCALE;
-
-            // Gravity estimate recorded with this sample
-            float sgx = (float)snapshot.gravityX / ACCEL_SCALE;
-            float sgy = (float)snapshot.gravityY / ACCEL_SCALE;
-            float sgz = (float)snapshot.gravityZ / ACCEL_SCALE;
-
-            // Same gravity-removal approach as readSensor()
-            float snapshotLinearX = (sax - sgx) * GRAVITY;
-            float snapshotLinearY = (say - sgy) * GRAVITY;
-            float snapshotLinearZ = (saz - sgz) * GRAVITY;
-
-            snapshotImpact =
-                sqrt(
-                    snapshotLinearX * snapshotLinearX +
-                    snapshotLinearY * snapshotLinearY +
-                    snapshotLinearZ * snapshotLinearZ
-                );
-        }
 
     // =================================================
     // STORE RECORD
@@ -1442,111 +1103,42 @@ void completeSwing(
         records[recordCount].swing_count =
             swingCount;
 
-        // Session-relative timestamps in milliseconds.
-        records[recordCount].timestamp_ms =
+        // Session-relative times in milliseconds.
+        records[recordCount].timestamp =
             toSessionMillis(completionTime);
 
-        records[recordCount].start_time_ms =
+        records[recordCount].start_time =
             toSessionMillis(swingStartTime);
 
-        records[recordCount].end_time_ms =
+        records[recordCount].end_time =
             toSessionMillis(completionTime);
 
-        // Duration is still calculated using raw millis().
-        records[recordCount].duration_ms =
+        records[recordCount].duration =
             duration;
 
-        // Peak-speed event axes.
-        records[recordCount].spax = spax;
-        records[recordCount].spay = spay;
-        records[recordCount].spaz = spaz;
+        // Baseline live sensor values at completion.
+        records[recordCount].ax = ax;
+        records[recordCount].ay = ay;
+        records[recordCount].az = az;
 
-        records[recordCount].spgx = spgx;
-        records[recordCount].spgy = spgy;
-        records[recordCount].spgz = spgz;
+        records[recordCount].gx = gx;
+        records[recordCount].gy = gy;
+        records[recordCount].gz = gz;
 
-        records[recordCount].peak_speed =
-            speed;
+        records[recordCount].speed = speed;
 
-        // Peak-impact event axes.
-        records[recordCount].imax = imax;
-        records[recordCount].imay = imay;
-        records[recordCount].imaz = imaz;
-
-        records[recordCount].imgx = imgx;
-        records[recordCount].imgy = imgy;
-        records[recordCount].imgz = imgz;
-
-        records[recordCount].peak_impact =
-            impact;
-
-        // Batch label and MPU interrupt result.
-        records[recordCount].hit_label =
-            hitLabel;
+        records[recordCount].impact = impact;
 
         records[recordCount].int_flag =
             swingIntFlag ? 1 : 0;
 
-        // Store the settings used for this swing.
-        records[recordCount].mot_thr =
-            motThr;
-
-        records[recordCount].mot_dur =
-            motDur;
-                // =============================================
-        // MIDPOINT SNAPSHOT
-        // =============================================
-
-        records[recordCount].snapshot_timestamp_ms =
-            snapshot.found
-            ? toSessionMillis(snapshot.timestamp)
-            : 0;
-
-        records[recordCount].snapshot_ax =
-            snapshot.found
-            ? (float)snapshot.ax / ACCEL_SCALE
-            : 0;
-
-        records[recordCount].snapshot_ay =
-            snapshot.found
-            ? (float)snapshot.ay / ACCEL_SCALE
-            : 0;
-
-        records[recordCount].snapshot_az =
-            snapshot.found
-            ? (float)snapshot.az / ACCEL_SCALE
-            : 0;
-
-        records[recordCount].snapshot_gx =
-            snapshot.found
-            ? ((float)snapshot.gx / GYRO_SCALE) - gyroBiasX
-            : 0;
-
-        records[recordCount].snapshot_gy =
-            snapshot.found
-            ? ((float)snapshot.gy / GYRO_SCALE) - gyroBiasY
-            : 0;
-
-        records[recordCount].snapshot_gz =
-            snapshot.found
-            ? ((float)snapshot.gz / GYRO_SCALE) - gyroBiasZ
-            : 0;
-
-        records[recordCount].snapshot_source =
-            snapshot.source;
-
-        records[recordCount].snapshot_clipped =
-            snapshot.clipped ? 1 : 0;
-
         recordCount++;
     }
-    else
-    {
-        Serial.println("WARNING: CSV RAM storage is full.");
-    }
+
 
     // =================================================
     // SERIAL OUTPUT
+    // BASELINE OUTPUT PRESERVED + INT STATUS
     // =================================================
 
     Serial.println();
@@ -1554,18 +1146,6 @@ void completeSwing(
 
     Serial.print("SWING #");
     Serial.println(swingCount);
-
-    Serial.print("Session timestamp (ms): ");
-    Serial.println(toSessionMillis(completionTime));
-
-    Serial.print("Swing start (session ms): ");
-    Serial.println(toSessionMillis(swingStartTime));
-
-    Serial.print("Swing end (session ms): ");
-    Serial.println(toSessionMillis(completionTime));
-
-    Serial.print("Swing duration (ms): ");
-    Serial.println(duration);
 
     Serial.print("Speed: ");
     Serial.println(speed);
@@ -1577,23 +1157,16 @@ void completeSwing(
     Serial.print(duration / 1000.0);
     Serial.println(" s");
 
-    Serial.print("Hit label: ");
-    Serial.println(hitLabel);
-
     Serial.print("MPU INT flag: ");
     Serial.println(swingIntFlag ? 1 : 0);
-
-    Serial.print("MOT_THR: ");
-    Serial.println(motThr);
-
-    Serial.print("MOT_DUR: ");
-    Serial.println(motDur);
 
     Serial.println("------------------------------------");
 }
 
+
 // =====================================================
 // STATE STRING
+// BASELINE — UNCHANGED
 // =====================================================
 
 String stateToString()
@@ -1613,8 +1186,11 @@ String stateToString()
     return "UNKNOWN";
 }
 
+
 // =====================================================
 // WEB DASHBOARD
+// BASELINE DESIGN PRESERVED
+// INT STATUS AND SETTINGS ADDED
 // =====================================================
 
 void handleRoot()
@@ -1671,7 +1247,7 @@ button {
     cursor: pointer;
 }
 
-input, select {
+input {
     padding: 10px;
     margin: 5px 0 12px 0;
     font-size: 16px;
@@ -1692,11 +1268,13 @@ label {
 
 </head>
 
+
 <body>
 
 <div class="container">
 
 <h1>🏸 Badminton AI</h1>
+
 
 <div class="card">
 
@@ -1721,6 +1299,7 @@ Instant Speed:
 
 </div>
 
+
 <div class="card">
 
 <h2>Swing Detection</h2>
@@ -1736,26 +1315,19 @@ Swing Count:
 </p>
 
 <p>
-    Snapshot Speed:
-    <span id="snapshotSpeed" class="value">0</span>
+Peak Speed:
+<span id="peakSpeed" class="value">0</span>
 </p>
 
 <p>
-    Snapshot Impact:
-    <span id="snapshotImpact" class="value">0</span>
-    m/s²
+Peak Impact:
+<span id="impact" class="value">0</span>
 </p>
+
 <p>
 Duration:
 <span id="duration" class="value">0</span>
 s
-</p>
-
-
-<p>
-Session Elapsed:
-<span id="sessionElapsed" class="value">0</span>
-ms
 </p>
 
 <p>
@@ -1764,6 +1336,7 @@ MPU INT detected for current swing:
 </p>
 
 </div>
+
 
 <div class="card">
 
@@ -1782,30 +1355,6 @@ Current Peak Speed:
 
 </div>
 
-<div class="card">
-
-<h2>Batch Label</h2>
-
-<p>
-Set the label once before recording a batch.
-</p>
-
-<label for="hitLabel">Swing label</label>
-
-<select id="hitLabel">
-    <option value="0">0 - Free swing</option>
-    <option value="1">1 - Real shuttle hit</option>
-</select>
-
-<button onclick="applySettings()">
-Apply label and INT settings
-</button>
-
-<p id="settingsStatus" class="status">
-Current settings loaded from ESP32.
-</p>
-
-</div>
 
 <div class="card">
 
@@ -1834,11 +1383,20 @@ interrupt. They are separate from the swing FSM thresholds.
     max="255"
     value="1">
 
+<button onclick="applySettings()">
+Apply INT settings
+</button>
+
+<p id="settingsStatus" class="status">
+Current settings loaded from ESP32.
+</p>
+
 <p>
 GPIO 4 is used for the MPU6050 INT input.
 </p>
 
 </div>
+
 
 <div class="card">
 
@@ -1853,6 +1411,7 @@ Download CSV
 </div>
 
 </div>
+
 
 <script>
 
@@ -1873,71 +1432,75 @@ async function updateData()
         const d =
             await response.json();
 
+
         document.getElementById(
             'acceleration'
         ).innerText =
             Number(d.acceleration).toFixed(2);
+
 
         document.getElementById(
             'gyro'
         ).innerText =
             Number(d.gyro).toFixed(1);
 
+
         document.getElementById(
             'speed'
         ).innerText =
             Number(d.speed).toFixed(2);
+
 
         document.getElementById(
             'state'
         ).innerText =
             d.state;
 
+
         document.getElementById(
             'count'
         ).innerText =
             d.count;
 
-        document.getElementById(
-            'snapshotSpeed'
-        ).innerText =
-            Number(d.snapshotSpeed).toFixed(2);
 
         document.getElementById(
-            'snapshotImpact'
+            'peakSpeed'
         ).innerText =
-            Number(d.snapshotImpact).toFixed(2);
+            Number(d.peakSpeed).toFixed(2);
+
+
+        document.getElementById(
+            'impact'
+        ).innerText =
+            Number(d.impact).toFixed(2);
+
 
         document.getElementById(
             'duration'
         ).innerText =
             Number(d.duration).toFixed(2);
 
-        document.getElementById(
-            'sessionElapsed'
-        ).innerText = d.sessionElapsedMs;
 
         document.getElementById(
             'currentPeakAcc'
         ).innerText =
             Number(d.currentPeakAcc).toFixed(2);
 
+
         document.getElementById(
             'currentPeakSpeed'
         ).innerText =
             Number(d.currentPeakSpeed).toFixed(2);
+
 
         document.getElementById(
             'intFlag'
         ).innerText =
             d.intFlag;
 
+
         if (!settingsInitialized)
         {
-            document.getElementById(
-                'hitLabel'
-            ).value = String(d.hitLabel);
-
             document.getElementById(
                 'motThr'
             ).value = d.motThr;
@@ -1955,11 +1518,9 @@ async function updateData()
     }
 }
 
+
 async function applySettings()
 {
-    const hit =
-        document.getElementById('hitLabel').value;
-
     const thr =
         document.getElementById('motThr').value;
 
@@ -1972,9 +1533,7 @@ async function applySettings()
     try
     {
         const response = await fetch(
-            '/settings?hit=' +
-            encodeURIComponent(hit) +
-            '&thr=' +
+            '/settings?thr=' +
             encodeURIComponent(thr) +
             '&dur=' +
             encodeURIComponent(dur) +
@@ -1989,8 +1548,7 @@ async function applySettings()
         if (result.ok)
         {
             status.innerText =
-                'Applied. hit_label=' + result.hitLabel +
-                ', MOT_THR=' + result.motThr +
+                'Applied. MOT_THR=' + result.motThr +
                 ', MOT_DUR=' + result.motDur;
         }
         else
@@ -2006,8 +1564,10 @@ async function applySettings()
     }
 }
 
+
 // Update immediately
 updateData();
+
 
 // Update every 100 ms
 setInterval(
@@ -2017,11 +1577,13 @@ setInterval(
 
 </script>
 
+
 </body>
 
 </html>
 
 )rawliteral";
+
 
     server.sendHeader(
         "Cache-Control",
@@ -2035,8 +1597,10 @@ setInterval(
     );
 }
 
+
 // =====================================================
 // JSON DATA
+// BASELINE FIELDS PRESERVED + INT STATUS
 // =====================================================
 
 void handleData()
@@ -2068,25 +1632,13 @@ void handleData()
     json += ",\"duration\":";
     json += String(lastSwingDuration / 1000.0, 2);
 
-    json += ",\"sessionElapsedMs\":";
-    json += String(getSessionMillis());
-
     json += ",\"currentPeakAcc\":";
     json += String(peakAcceleration, 2);
 
     json += ",\"currentPeakSpeed\":";
     json += String(peakSpeed, 2);
 
-    // NEW: Snapshot-derived features
-    json += ",\"snapshotSpeed\":";
-    json += String(snapshotSpeed, 2);
-
-    json += ",\"snapshotImpact\":";
-    json += String(snapshotImpact, 2);
-
-    json += ",\"hitLabel\":";
-    json += String(hitLabel);
-
+    // Added INT information
     json += ",\"intFlag\":";
     json += String(swingIntFlag ? 1 : 0);
 
@@ -2099,7 +1651,11 @@ void handleData()
     json += ",\"mpuIntStatus\":";
     json += String(lastMpuIntStatus);
 
+    json += ",\"sessionElapsedMs\":";
+    json += String(getSessionMillis());
+
     json += "}";
+
 
     server.sendHeader(
         "Cache-Control",
@@ -2112,35 +1668,19 @@ void handleData()
         json
     );
 }
+
+
 // =====================================================
-// APPLY DASHBOARD SETTINGS
+// APPLY DASHBOARD INT SETTINGS
 // =====================================================
 
 void handleSettings()
 {
     bool valid = true;
 
-    // ---------------------------------------------
-    // Batch hit label
-    // ---------------------------------------------
+    uint8_t requestedThr = motThr;
+    uint8_t requestedDur = motDur;
 
-    if (server.hasArg("hit"))
-    {
-        int requestedHit =
-            server.arg("hit").toInt();
-
-        if (
-            requestedHit == 0 ||
-            requestedHit == 1
-        )
-        {
-            hitLabel = requestedHit;
-        }
-        else
-        {
-            valid = false;
-        }
-    }
 
     // ---------------------------------------------
     // MOT_THR
@@ -2148,21 +1688,18 @@ void handleSettings()
 
     if (server.hasArg("thr"))
     {
-        long requestedThr =
-            server.arg("thr").toInt();
+        long value = server.arg("thr").toInt();
 
-        if (
-            requestedThr >= 0 &&
-            requestedThr <= 255
-        )
+        if (value >= 0 && value <= 255)
         {
-            motThr = (uint8_t)requestedThr;
+            requestedThr = (uint8_t)value;
         }
         else
         {
             valid = false;
         }
     }
+
 
     // ---------------------------------------------
     // MOT_DUR
@@ -2170,15 +1707,11 @@ void handleSettings()
 
     if (server.hasArg("dur"))
     {
-        long requestedDur =
-            server.arg("dur").toInt();
+        long value = server.arg("dur").toInt();
 
-        if (
-            requestedDur >= 0 &&
-            requestedDur <= 255
-        )
+        if (value >= 0 && value <= 255)
         {
-            motDur = (uint8_t)requestedDur;
+            requestedDur = (uint8_t)value;
         }
         else
         {
@@ -2186,29 +1719,28 @@ void handleSettings()
         }
     }
 
+
     // ---------------------------------------------
-    // Apply sensor interrupt configuration
+    // Apply settings if valid
     // ---------------------------------------------
 
     if (valid)
     {
-        configureMpuMotionInterrupt();
+        motThr = requestedThr;
+        motDur = requestedDur;
 
-        // Do not erase an already accepted active-swing
-        // interrupt flag when settings are changed.
+        configureMpuMotionInterrupt();
     }
 
+
     // ---------------------------------------------
-    // Return updated settings as JSON
+    // Return JSON
     // ---------------------------------------------
 
     String json = "{";
 
     json += "\"ok\":";
     json += valid ? "true" : "false";
-
-    json += ",\"hitLabel\":";
-    json += String(hitLabel);
 
     json += ",\"motThr\":";
     json += String(motThr);
@@ -2217,6 +1749,7 @@ void handleSettings()
     json += String(motDur);
 
     json += "}";
+
 
     server.sendHeader(
         "Cache-Control",
@@ -2229,13 +1762,11 @@ void handleSettings()
         json
     );
 
+
     if (valid)
     {
         Serial.println();
-        Serial.println("Dashboard settings applied.");
-
-        Serial.print("hit_label = ");
-        Serial.println(hitLabel);
+        Serial.println("Dashboard INT settings applied.");
 
         Serial.print("MOT_THR = ");
         Serial.println(motThr);
@@ -2245,8 +1776,10 @@ void handleSettings()
     }
 }
 
+
 // =====================================================
 // CSV DOWNLOAD
+// EXACT REQUESTED COLUMN ORDER
 // =====================================================
 
 void handleDownload()
@@ -2255,28 +1788,16 @@ void handleDownload()
 
     csv +=
         "swing_count,"
-        "timestamp_ms,"
-        "start_time_ms,"
-        "end_time_ms,"
-        "duration_ms,"
-        "spax,spay,spaz,"
-        "spgx,spgy,spgz,"
-        "peak_speed,"
-        "imax,imay,imaz,"
-        "imgx,imgy,imgz,"
-        "peak_impact,"
-        "hit_label,"
-        "int_flag,"
-        "mot_thr,"
-        "mot_dur,"
-        "snapshot_timestamp_ms,"
-        "snapshot_ax,snapshot_ay,snapshot_az,"
-        "snapshot_gx,snapshot_gy,snapshot_gz,"
-        "snapshot_source,"
-        "snapshot_clipped,"
-        "snapshot_speed,"
-        "snapshot_impact\n";
-        
+        "timestamp,"
+        "start_time,"
+        "end_time,"
+        "duration,"
+        "ax,ay,az,"
+        "gx,gy,gz,"
+        "speed,"
+        "impact,"
+        "int_flag\n";
+
 
     for (int i = 0; i < recordCount; i++)
     {
@@ -2287,129 +1808,81 @@ void handleDownload()
         csv += ",";
 
         csv += String(
-            records[i].timestamp_ms
+            records[i].timestamp
         );
 
         csv += ",";
 
         csv += String(
-            records[i].start_time_ms
+            records[i].start_time
         );
 
         csv += ",";
 
         csv += String(
-            records[i].end_time_ms
+            records[i].end_time
         );
 
         csv += ",";
 
         csv += String(
-            records[i].duration_ms
+            records[i].duration
         );
 
         csv += ",";
 
         csv += String(
-            records[i].spax,
-            4
+            records[i].ax,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].spay,
-            4
+            records[i].ay,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].spaz,
-            4
+            records[i].az,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].spgx,
-            4
+            records[i].gx,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].spgy,
-            4
+            records[i].gy,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].spgz,
-            4
+            records[i].gz,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].peak_speed,
-            4
+            records[i].speed,
+            2
         );
 
         csv += ",";
 
         csv += String(
-            records[i].imax,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].imay,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].imaz,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].imgx,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].imgy,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].imgz,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].peak_impact,
-            4
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].hit_label
+            records[i].impact,
+            2
         );
 
         csv += ",";
@@ -2418,64 +1891,13 @@ void handleDownload()
             records[i].int_flag
         );
 
-        csv += ",";
-
-        csv += String(
-            records[i].mot_thr
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].mot_dur
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].snapshot_timestamp_ms
-        );
-
-        csv += ",";
-
-        csv += String(records[i].snapshot_ax, 4);
-        csv += ",";
-        csv += String(records[i].snapshot_ay, 4);
-        csv += ",";
-        csv += String(records[i].snapshot_az, 4);
-
-        csv += ",";
-
-        csv += String(records[i].snapshot_gx, 4);
-        csv += ",";
-        csv += String(records[i].snapshot_gy, 4);
-        csv += ",";
-        csv += String(records[i].snapshot_gz, 4);
-
-        csv += ",";
-
-        csv += String(
-            records[i].snapshot_source
-        );
-
-        csv += ",";
-
-        csv += String(
-            records[i].snapshot_clipped
-        );
-
-        csv += ",";
-        csv += String(records[i].snapshot_speed, 4);
-
-        csv += ",";
-        csv += String(records[i].snapshot_impact, 4);
-
         csv += "\n";
     }
 
+
     server.sendHeader(
         "Content-Disposition",
-        "attachment; filename=badminton_int_calibration.csv"
+        "attachment; filename=badminton_data.csv"
     );
 
     server.sendHeader(
@@ -2490,8 +1912,10 @@ void handleDownload()
     );
 }
 
+
 // =====================================================
 // MAIN LOOP
+// BASELINE LOOP PRESERVED + INT SERVICE
 // =====================================================
 
 void loop()
@@ -2502,12 +1926,14 @@ void loop()
     // Read MPU6050
     readSensor();
 
-    // Service interrupt flag in normal loop context.
+    // Service MPU interrupt in normal loop context.
     serviceMpuInterrupt();
 
     // Process swing detector
     processSwing();
 
-    // Small sampling delay retained from original code.
+    // Small sampling delay
     delay(2);
 }
+
+
